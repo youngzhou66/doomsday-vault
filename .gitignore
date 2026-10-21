@@ -1,0 +1,10 @@
+# 运行时数据（库、缓存、备份、导出）都不入库
+data/
+node_modules/
+*.log
+
+# 测试临时目录
+tests/.tmp/
+
+# 便携版 FFmpeg（体积大，不入库；npm run doctor 会检测它是否存在）
+tools/

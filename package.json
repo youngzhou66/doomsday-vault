@@ -1,0 +1,30 @@
+{
+  "name": "doomsday-vault",
+  "version": "1.0.0",
+  "private": true,
+  "description": "末日电影库 — 离线优先的本地电影管理工具（仅管理用户合法拥有的本地视频）",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "movie-library",
+    "offline-first",
+    "local-first",
+    "tmdb",
+    "ffprobe",
+    "zero-dependencies"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "start": "node server/index.mjs",
+    "dev": "node --watch server/index.mjs",
+    "test": "node --test",
+    "doctor": "node scripts/doctor.mjs",
+    "scan": "node scripts/cli.mjs scan",
+    "export": "node scripts/cli.mjs export",
+    "backup": "node scripts/cli.mjs backup"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

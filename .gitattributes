@@ -1,0 +1,11 @@
+# 统一换行符，避免 Windows/macOS/Linux 互相污染
+* text=auto eol=lf
+
+# Windows 批处理需要 CRLF 才能稳定运行
+*.cmd text eol=crlf
+
+# 二进制
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
