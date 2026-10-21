@@ -52,7 +52,7 @@ npm run doctor
 
 | 页面上的名称 | 样子 | 本程序怎么用 |
 | --- | --- | --- |
-| **API 密钥 / API Key**（v3 auth） | `200e8244…337bd3`，32 位十六进制 | 作为 `?api_key=` 查询参数 |
+| **API 密钥 / API Key**（v3 auth） | `0123456789abcdef0123456789abcdef`，32 位十六进制 | 作为 `?api_key=` 查询参数 |
 | **API 读访问令牌 / Read Access Token**（v4 auth） | `eyJhbGciOiJIUzI1NiJ9…`，很长的 JWT | 作为 `Authorization: Bearer` 头 |
 
 贴错位置（例如把 v4 令牌贴进 v3 的位置）也不会卡死：收到 401 后会自动换另一种方式重试一次。
