@@ -57,11 +57,24 @@ registerActions({
     const tmdbId = Number(element.dataset.tmdb);
     const movieId = state.matchTarget?.id;
     if (!movieId) return;
-    hideModal();
+    // 先请求、成功了再关窗：失败时对话框还在，可以直接换个候选中试
+    const original = element.innerHTML;
+    element.disabled = true;
+    element.innerHTML = `${original}<span class="view-sub" style="margin-left:8px">写入中…</span>`;
     toast('正在写入元数据…');
-    const result = await api.match(movieId, tmdbId);
-    toast(`已匹配：${result.movie.title} (${result.movie.year ?? '—'})`, 'ok');
-    await runtime.refreshHealth();
-    await onPicked?.();
+    try {
+      const result = await api.match(movieId, tmdbId);
+      hideModal();
+      toast(`已匹配：${result.movie.title}（${result.movie.year ?? '—'}）`, 'ok');
+      // 详情抽屉 / 待确认队列自己刷新
+      await onPicked?.();
+      // 库列表卡片也要跟着更新（标题、海报、待确认标记）
+      runtime.reload();
+      await runtime.refreshHealth();
+    } catch (err) {
+      element.disabled = false;
+      element.innerHTML = original;
+      toast(`匹配失败：${err.message}`, 'err', 6000);
+    }
   },
 });
