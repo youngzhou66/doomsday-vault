@@ -288,6 +288,43 @@ test('HTTP 接口端到端', async (t) => {
   const wishEmpty = await api(base, 'GET', '/api/watchlist');
   assert.equal(wishEmpty.payload.total, 0);
 
+  // 观看状态视图：本地影片与清单条目汇总到同一列表
+  await api(base, 'PATCH', `/api/movies/${first.id}`, { watched: false, wish: false });
+  const collectionWatchedEmpty = await api(base, 'GET', '/api/collection/watched');
+  assert.equal(collectionWatchedEmpty.payload.total, 0, '清零后本地没人标已看');
+  const markWatchedLocal = await api(base, 'PATCH', `/api/movies/${first.id}`, { watched: true });
+  assert.equal(markWatchedLocal.payload.watched, true);
+  const collectionWatched = await api(base, 'GET', '/api/collection/watched');
+  assert.equal(collectionWatched.payload.counts.library, 1);
+  assert.equal(collectionWatched.payload.items[0].source, 'library');
+  assert.equal(collectionWatched.payload.items[0].hasFile, true);
+  assert.match(collectionWatched.payload.items[0].posterUrl, /^\/api\/movies\//);
+
+  // 想看与已看互斥：标想看会清掉已看时间
+  const markWishLocal = await api(base, 'PATCH', `/api/movies/${first.id}`, { wish: true });
+  assert.equal(markWishLocal.payload.wish, true);
+  assert.equal(markWishLocal.payload.watched, false);
+  assert.equal(markWishLocal.payload.watchedAt, null);
+  const collectionWish = await api(base, 'GET', '/api/collection/wish');
+  assert.equal(collectionWish.payload.counts.library, 1);
+  const collectionWatchedAfter = await api(base, 'GET', '/api/collection/watched');
+  assert.equal(collectionWatchedAfter.payload.total, 0);
+
+  // 清单条目也会出现在状态视图里
+  const externalWatched = await api(base, 'POST', '/api/watchlist', { title: '外部已看片', year: 2020, status: 'watched' });
+  assert.equal(externalWatched.payload.item.status, 'watched');
+  const mixedWatched = await api(base, 'GET', '/api/collection/watched');
+  assert.equal(mixedWatched.payload.counts.external, 1);
+  assert.equal(mixedWatched.payload.items[0].source, 'watchlist');
+  assert.equal(mixedWatched.payload.items[0].hasFile, false);
+  await api(base, 'DELETE', `/api/watchlist/${externalWatched.payload.item.id}`);
+
+  // 非法 status
+  assert.equal((await api(base, 'GET', '/api/collection/bogus')).status, 400);
+
+  // 复原成「已看」，避免影响后面的断言（重定位那段会检查 watched 保留）
+  await api(base, 'PATCH', `/api/movies/${first.id}`, { watched: true, wish: false });
+
   // 视频流（Range）
   const ranged = await fetch(`${base}/api/movies/${first.id}/stream`, { headers: { Range: 'bytes=0-99' } });
   assert.equal(ranged.status, 206);

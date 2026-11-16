@@ -85,6 +85,7 @@ export const api = {
   scrapeQueue: (body) => request('POST', '/api/queue/scrape', body ?? {}),
 
   watchlist: (status) => request('GET', `/api/watchlist${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  collection: (status) => request('GET', `/api/collection/${encodeURIComponent(status)}`),
   addToWatchlist: (body) => request('POST', '/api/watchlist', body),
   patchWatchlist: (id, patch) => request('PATCH', `/api/watchlist/${encodeURIComponent(id)}`, patch),
   deleteFromWatchlist: (id) => request('DELETE', `/api/watchlist/${encodeURIComponent(id)}`),

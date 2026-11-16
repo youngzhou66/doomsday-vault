@@ -353,7 +353,15 @@ body::before {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
 }
 
-/* 想看清单 */
+/* 想看标记：海报右下角的蓝色书签 */
+.card-wish {
+  position: absolute; right: 8px; bottom: 8px; z-index: 2;
+  width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: rgba(90, 140, 200, 0.92);
+  color: #0a1420;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
 .wish-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));

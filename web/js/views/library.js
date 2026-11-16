@@ -183,6 +183,7 @@ function cardHtml(movie) {
         ${posterMarkup(movie)}
         ${pendingDot(movie)}
         ${movie.watched ? `<span class="card-watched" title="已看">${icon('check', 11)}</span>` : ''}
+        ${movie.wish && !movie.watched ? `<span class="card-wish" title="想看">${icon('bookmark', 11)}</span>` : ''}
         <span class="card-check">${icon('check', 12)}</span>
       </div>
       <div class="card-body">
@@ -203,6 +204,7 @@ function rowHtml(movie) {
       <div class="tr-title">
         ${movie.missing ? '<span class="badge err">缺失</span>' : ''}
         ${movie.watched ? '<span class="badge ok">已看</span>' : ''}
+        ${movie.wish && !movie.watched ? '<span class="badge accent">想看</span>' : ''}
         <span title="${esc(movie.path)}">${esc(movie.title)}</span>
       </div>
       <div class="mono">${movie.year ?? '—'}</div>

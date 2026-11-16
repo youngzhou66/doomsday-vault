@@ -195,12 +195,14 @@ export class Library {
     let totalBytes = 0;
     let episodes = 0;
     let watched = 0;
+    let wish = 0;
     const tags = new Map();
     const collections = new Map();
     for (const movie of this.movies.values()) {
       if (movie.missing) missing += 1;
       if (movie.kind === 'episode') episodes += 1;
       if (movie.watchedAt) watched += 1;
+      if (movie.wishAt) wish += 1;
       totalBytes += Number(movie.size) || 0;
       if (movie.matchState === 'pending') pending += 1;
       else if (movie.matchState === 'confirmed' || movie.matchState === 'auto') confirmed += 1;
@@ -217,6 +219,7 @@ export class Library {
       episodes,
       totalBytes,
       watched,
+      wish,
       unwatched: this.movies.size - watched,
       tags: [...tags.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
       collections: [...collections.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),

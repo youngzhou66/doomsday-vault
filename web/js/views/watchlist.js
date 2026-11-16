@@ -1,40 +1,38 @@
 /**
- * 片单：想看 / 已看电影。
+ * 观看状态视图：想看 / 已看电影。
  *
- * 这两个页面共用一套数据（data/watchlist.json），区别只是 status：
- *   wish    —— 还没看
- *   watched —— 看过了（本地不一定有文件）
+ * 这两个页面是「状态维度」的汇总，同时包含两种来源：
+ *   - library   本地有文件，在详情页标了想看/已看（同时仍在「已有电影」里）
+ *   - watchlist 本地没有文件，直接从 TMDB 加进清单的
  *
- * 主库里的记录不在这里：主库每条都对应一个本地文件，已看标记在那边用绿勾表示。
- * 两边靠 TMDB 编号自动比对，清单里出现主库已有的片子时会显示「已在库中」。
+ * 「已有电影」是「来源维度」（本地有没有文件），所以同一部片子会同时出现在两个页面，
+ * 这是设计如此，不是重复数据。
  */
 import { api } from '../api.js';
 import { hideModal, showModal } from '../modal.js';
 import { registerActions, runtime, state } from '../state.js';
-import { esc, icon, toast } from '../util.js';
+import { esc, fmtBytes, icon, toast } from '../util.js';
 
 const PAGES = {
   wish: {
     title: '想看',
-    status: 'wish',
-    otherStatus: 'watched',
+    hint: '汇总所有「想看」的片子：本地已有的（在「已有电影」详情页点「想看」）+ 从 TMDB 加进清单的。',
+    emptyTitle: '还没有想看标记',
+    emptyHint: '在「已有电影」的详情页点「想看」，或者点右上角从 TMDB 添加一部。',
     addTitle: '添加想看的电影',
-    hint: '这里放「还没下载 / 还没整理」的片子。从 TMDB 加进来会把标题、年份、评分、简介和海报缓存在本地，断网也能看；本地有了文件后会自动显示「已在库中」。',
-    emptyTitle: '想看清单还是空的',
-    emptyHint: '点右上角「添加」，从 TMDB 搜一部；或者直接手动记个片名。',
+    otherStatus: 'watched',
     toggleLabel: '已看',
-    toggleTitle: '标记为已看，移到「已看电影」',
+    toggleTitle: '看过了，移到「已看电影」',
   },
   watched: {
     title: '已看电影',
-    status: 'watched',
-    otherStatus: 'wish',
+    hint: '汇总所有「看过」的片子：本地已看的（同时仍在「已有电影」里）+ 看过但本地没留、从 TMDB 加进清单的。',
+    emptyTitle: '还没有已看标记',
+    emptyHint: '在「已有电影」的详情页点「已看」，或者点右上角补一部看过但本地没留的片子。',
     addTitle: '添加已看的电影',
-    hint: '这里放「看过、但本地没有留（或还没下载）」的片子，可以直接从 TMDB 加。本地已有的片子请直接在「已有电影」里标已看，两边不会重复。',
-    emptyTitle: '还没有记录',
-    emptyHint: '看过但本地没留的片子，点右上角「添加」从 TMDB 补进来。',
+    otherStatus: 'wish',
     toggleLabel: '改回想看',
-    toggleTitle: '还没看，移回「想看」',
+    toggleTitle: '其实还没看，移回「想看」',
   },
 };
 
@@ -52,48 +50,49 @@ function posterHtml(item) {
     <span class="pf-glyph">${icon('film', 22)}</span>
     <span class="pf-title">${esc(item.title)}</span>
     ${item.year ? `<span class="pf-year">${item.year}</span>` : ''}`;
-  if (!item.hasPoster) return `<div class="poster"><div class="poster-fallback">${fallback}</div></div>`;
+  if (!item.posterUrl) return `<div class="poster"><div class="poster-fallback">${fallback}</div></div>`;
   return `<div class="poster">
-    <img src="${api.watchlistPosterUrl(item.id)}" alt="" loading="lazy" data-watch-poster />
+    <img src="${item.posterUrl}" alt="" loading="lazy" data-watch-poster />
     <div class="poster-fallback" hidden>${fallback}</div>
   </div>`;
 }
 
 function cardHtml(item) {
+  const cfg = config();
   const meta = [
     item.year ?? '—',
     item.runtimeMin ? `${item.runtimeMin} 分钟` : null,
     item.voteAverage ? `★ ${Number(item.voteAverage).toFixed(1)}` : null,
+    item.hasFile && item.resolution ? item.resolution : null,
+    item.hasFile && item.size ? fmtBytes(item.size) : null,
   ].filter(Boolean).join(' · ');
-  const cfg = config();
+
+  const badges = [
+    item.hasFile ? '<span class="badge ok">本地文件</span>' : '<span class="badge">清单</span>',
+    `<span class="badge accent">${item.status === 'watched' ? '已看' : '想看'}</span>`,
+    item.tmdbId ? `<span class="badge">TMDB ${item.tmdbId}</span>` : '<span class="badge err">未关联 TMDB</span>',
+  ].join('');
+
+  const actions = item.source === 'library'
+    ? `<button class="btn sm" data-act="collection.toggle" data-id="${esc(item.id)}" data-source="library" data-status="${cfg.otherStatus}"
+         title="${esc(cfg.toggleTitle)}">${icon('check', 12)}${esc(cfg.toggleLabel)}</button>
+       <button class="btn sm ghost" data-act="collection.open" data-id="${esc(item.id)}" title="打开详情">${icon('reveal', 12)}详情</button>`
+    : `<button class="btn sm" data-act="collection.toggle" data-id="${esc(item.id)}" data-source="watchlist" data-status="${cfg.otherStatus}"
+         title="${esc(cfg.toggleTitle)}">${icon('check', 12)}${esc(cfg.toggleLabel)}</button>
+       ${item.tmdbId ? '' : `<button class="btn sm" data-act="wish.refresh" data-id="${esc(item.id)}" title="用片名搜一次 TMDB，补全元数据">${icon('refresh', 12)}补全</button>`}
+       <button class="btn sm ghost" data-act="wish.remove" data-id="${esc(item.id)}" title="从清单删除">${icon('trash', 12)}</button>`;
+
   return `
-    <article class="panel wish-card" data-wish-id="${esc(item.id)}">
+    <article class="panel wish-card" data-id="${esc(item.id)}" data-source="${item.source}">
       ${posterHtml(item)}
       <div class="wish-body">
         <h4 class="wish-title" title="${esc(item.title)}">${esc(item.title)}</h4>
         <div class="wish-meta">${esc(meta)}</div>
-        <div class="wish-badges">
-          <span class="badge ${item.owned ? 'ok' : 'accent'}">${item.owned ? '已在库中' : (item.status === 'watched' ? '已看' : '想看')}</span>
-          ${item.tmdbId ? `<span class="badge">TMDB ${item.tmdbId}</span>` : '<span class="badge err">未关联 TMDB</span>'}
-        </div>
-        <div class="wish-actions">
-          <button class="btn sm" data-act="wish.status" data-id="${esc(item.id)}" data-status="${cfg.otherStatus}"
-            title="${esc(cfg.toggleTitle)}">${icon('check', 12)}${esc(cfg.toggleLabel)}</button>
-          ${item.tmdbId ? '' : `<button class="btn sm" data-act="wish.refresh" data-id="${esc(item.id)}" title="用片名搜一次 TMDB，补全元数据">${icon('refresh', 12)}补全</button>`}
-          <button class="btn sm ghost" data-act="wish.remove" data-id="${esc(item.id)}" title="从清单删除">${icon('trash', 12)}</button>
-        </div>
+        <div class="wish-badges">${badges}</div>
+        <div class="wish-actions">${actions}</div>
         ${item.note ? `<div class="wish-note">${esc(item.note)}</div>` : ''}
       </div>
     </article>`;
-}
-
-function mainLibraryWatchedHint() {
-  if (page !== 'watched') return '';
-  const watchedLocal = state.health?.facets?.watched ?? 0;
-  if (!watchedLocal) return '';
-  return `<div class="hint" style="margin-bottom:14px">${icon('info', 14)}
-    <span>「已有电影」里另有 <b>${watchedLocal}</b> 部标了已看的片子（本地有文件），不在这里重复显示。</span>
-  </div>`;
 }
 
 function bodyHtml() {
@@ -103,7 +102,7 @@ function bodyHtml() {
       <p>${esc(cfg.emptyHint)}</p>
       <button class="btn primary" data-act="wish.add">${icon('plus', 14)}${esc(cfg.addTitle)}</button></div>`;
   }
-  return `${mainLibraryWatchedHint()}<div class="wish-grid">${items.map(cardHtml).join('')}</div>`;
+  return `<div class="wish-grid">${items.map(cardHtml).join('')}</div>`;
 }
 
 function renderBody() {
@@ -119,10 +118,13 @@ function renderBody() {
     });
   }
   const countNode = document.getElementById('wish-count');
-  if (countNode) countNode.textContent = `共 ${items.length} 条${page === 'watched' ? ' · 本地没有这些文件' : ''}`;
+  if (countNode) {
+    const local = items.filter((item) => item.hasFile).length;
+    countNode.textContent = `共 ${items.length} 部 · 本地 ${local} · 清单 ${items.length - local}`;
+  }
 }
 
-export function renderWatchlist(root, options = {}) {
+export function renderCollection(root, options = {}) {
   page = options.status === 'watched' ? 'watched' : 'wish';
   const cfg = config();
   root.innerHTML = `
@@ -132,18 +134,18 @@ export function renderWatchlist(root, options = {}) {
         <div class="view-sub" id="wish-count">读取中…</div>
       </div>
       <div class="spacer"></div>
-      <button class="btn primary" data-act="wish.add">${icon('plus', 13)}添加</button>
+      <button class="btn primary" data-act="wish.add">${icon('plus', 13)}从 TMDB 添加</button>
     </div>
     <div class="hint" style="margin-bottom:14px">${icon('info', 14)}
       <span>${esc(cfg.hint)}</span>
     </div>
     <div id="wish-body"><div class="empty"><h3>读取中…</h3></div></div>`;
-  loadWatchlist();
+  loadCollection();
 }
 
-async function loadWatchlist() {
+async function loadCollection() {
   try {
-    const result = await api.watchlist(config().status);
+    const result = await api.collection(config().status === 'watched' ? 'watched' : 'wish');
     items = result.items ?? [];
     renderBody();
     await runtime.refreshHealth();
@@ -153,7 +155,7 @@ async function loadWatchlist() {
   }
 }
 
-/* ── 添加对话框 ───────────────────────────────────────── */
+/* ── 添加对话框（只往清单里加，本地影片用详情页标记） ──── */
 function candidatesHtml(results, action = 'wish.pick') {
   if (!results?.length) return '<div class="view-sub">没搜到，换个关键词试试</div>';
   return results.map((candidate) => `
@@ -167,7 +169,6 @@ function candidatesHtml(results, action = 'wish.pick') {
     </button>`).join('');
 }
 
-/** 补全时人工挑一个 TMDB 条目。 */
 function openPickDialog(itemId, candidates, reason) {
   pickTargetId = itemId;
   showModal({
@@ -199,7 +200,7 @@ function openAddDialog() {
         <input name="year" placeholder="年份（可选）" inputmode="numeric" style="max-width:120px" />
         <button class="btn" type="submit">加入${esc(cfg.title)}</button>
       </form>`,
-    footer: '<span class="view-sub">从 TMDB 添加时会顺带缓存海报；没有网络也能手动记片名，之后再补全</span>',
+    footer: '<span class="view-sub">从 TMDB 添加时会顺带缓存海报；本地已有的片子请在「已有电影」详情页标记状态，不在这里重复添加</span>',
   });
 }
 
@@ -208,9 +209,8 @@ async function addByTmdb(tmdbId) {
   try {
     const result = await api.addToWatchlist({ tmdbId, status });
     hideModal();
-    const where = status === 'watched' ? '已看电影' : '想看';
-    toast(result.existed ? '这部电影已经在清单里了' : `已加入${where}：${result.item.title}`, result.existed ? '' : 'ok');
-    await loadWatchlist();
+    toast(result.existed ? '这部电影已经在清单里了' : `已加入${config().title}：${result.item.title}`, result.existed ? '' : 'ok');
+    await loadCollection();
   } catch (err) {
     toast(`加入失败：${err.message}`, 'err', 6000);
   }
@@ -250,24 +250,33 @@ registerActions({
       const result = await api.addToWatchlist({ title, year: Number(year) || null, status: config().status });
       hideModal();
       toast(result.existed ? '这部电影已经在清单里了' : `已加入：${result.item.title}`, result.existed ? '' : 'ok');
-      await loadWatchlist();
+      await loadCollection();
     } catch (err) {
       toast(`加入失败：${err.message}`, 'err', 6000);
     }
   },
-  'wish.status': async (element) => {
+  /** 本地影片改观看状态；清单条目只需改 status */
+  'collection.toggle': async (element) => {
     const id = element.dataset.id;
+    const source = element.dataset.source;
     const status = element.dataset.status;
+    element.disabled = true;
     try {
-      await api.patchWatchlist(id, { status });
-      items = items.filter((item) => item.id !== id);
+      if (source === 'library') {
+        await api.patchMovie(id, status === 'watched' ? { watched: true } : { wish: true });
+      } else {
+        await api.patchWatchlist(id, { status });
+      }
+      items = items.filter((item) => !(item.id === id && item.source === source));
       renderBody();
       await runtime.refreshHealth();
-      toast(status === 'watched' ? '已移到「已看电影」' : '已移回「想看」', 'ok');
+      toast(status === 'watched' ? '已标记为已看' : '已移回想看', 'ok');
     } catch (err) {
+      element.disabled = false;
       toast(err.message, 'err');
     }
   },
+  'collection.open': (element) => runtime.openDetail(element.dataset.id),
   'wish.refresh': async (element) => {
     const id = element.dataset.id;
     element.disabled = true;
@@ -279,7 +288,7 @@ registerActions({
         element.disabled = false;
         return;
       }
-      await loadWatchlist();
+      await loadCollection();
       toast(`已补全：${result.item.title}`, 'ok');
     } catch (err) {
       element.disabled = false;
@@ -294,7 +303,7 @@ registerActions({
     try {
       const result = await api.linkWatchlist(id, tmdbId);
       hideModal();
-      await loadWatchlist();
+      await loadCollection();
       toast(`已关联：${result.item.title}`, 'ok');
     } catch (err) {
       element.disabled = false;
@@ -302,12 +311,12 @@ registerActions({
     }
   },
   'wish.remove': async (element) => {
-    const item = items.find((entry) => entry.id === element.dataset.id);
+    const item = items.find((entry) => entry.id === element.dataset.id && entry.source === 'watchlist');
     if (!item) return;
-    if (!window.confirm(`从清单里移除「${item.title}」？`)) return;
+    if (!window.confirm(`从清单里移除「${item.title}」？\n（本地文件不受影响）`)) return;
     try {
       await api.deleteFromWatchlist(item.id);
-      items = items.filter((entry) => entry.id !== item.id);
+      items = items.filter((entry) => !(entry.id === item.id && entry.source === 'watchlist'));
       renderBody();
       await runtime.refreshHealth();
       toast('已移除', 'ok');

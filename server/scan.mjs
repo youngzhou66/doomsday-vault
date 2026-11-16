@@ -288,6 +288,10 @@ export async function runScan(ctx) {
       resumeSec: existing?.resumeSec ?? 0,
       playCount: existing?.playCount ?? 0,
       lastPlayedAt: existing?.lastPlayedAt ?? null,
+      // 观看状态属于用户数据，重扫必须保留
+      watchedAt: existing?.watchedAt ?? null,
+      wishAt: existing?.wishAt ?? null,
+      customPoster: existing?.customPoster ?? null,
       missing: false,
       lastSeenAt: now(),
       // 文件名变了或首次入库 -> 重新进入待确认；否则保留原来的匹配结果

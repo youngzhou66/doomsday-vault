@@ -7,7 +7,7 @@ import { esc, fmtBytes, icon, toast } from './util.js';
 import { renderLibrary, reloadLibrary } from './views/library.js';
 import { closeDetail, openDetail } from './views/detail.js';
 import { renderQueue } from './views/queue.js';
-import { renderWatchlist } from './views/watchlist.js';
+import { renderCollection } from './views/watchlist.js';
 import { renderDupes } from './views/dupes.js';
 import { renderSettings } from './views/settings.js';
 
@@ -17,8 +17,8 @@ const topbar = document.getElementById('topbar');
 
 export const VIEWS = {
   library: { render: (root) => renderLibrary(root) },
-  watchlist: { render: (root) => renderWatchlist(root, { status: 'wish' }) },
-  watched: { render: (root) => renderWatchlist(root, { status: 'watched' }) },
+  watchlist: { render: (root) => renderCollection(root, { status: 'wish' }) },
+  watched: { render: (root) => renderCollection(root, { status: 'watched' }) },
   queue: { render: (root) => renderQueue(root) },
   dupes: { render: (root) => renderDupes(root) },
   settings: { render: (root) => renderSettings(root) },
@@ -99,6 +99,10 @@ function syncNavActive() {
 function sidebarHtml() {
   const counts = state.health?.counts ?? {};
   const facets = state.health?.facets ?? {};
+  const watchlistCounts = state.health?.watchlist ?? {};
+  // 想看 / 已看是状态维度：本地标记 + 清单条目一起算
+  const wishTotal = (counts.wish ?? 0) + (watchlistCounts.wish ?? 0);
+  const watchedTotal = (counts.watched ?? 0) + (watchlistCounts.watched ?? 0);
   const navItem = (href, iconName, label, badge) => `
     <a class="nav-item" href="${href}">
       ${icon(iconName, 16)}
@@ -112,8 +116,8 @@ function sidebarHtml() {
   return `
     <div class="nav-label">资料库</div>
     ${navItem('#/library', 'library', '已有电影', counts.total ?? 0)}
-    ${navItem('#/watchlist', 'bookmark', '想看', state.health?.watchlist?.wish ?? 0)}
-    ${navItem('#/watched', 'check', '已看电影', state.health?.watchlist?.watched ?? 0)}
+    ${navItem('#/watchlist', 'bookmark', '想看', wishTotal)}
+    ${navItem('#/watched', 'check', '已看电影', watchedTotal)}
     ${navItem('#/queue', 'queue', '待确认', counts.pending ?? 0)}
     ${navItem('#/dupes', 'copy', '重复文件', '')}
     ${navItem('#/library?missing=yes', 'warn', '仅缺失', counts.missing ?? 0)}

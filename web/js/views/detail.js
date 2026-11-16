@@ -18,6 +18,7 @@ function badgeList(movie) {
   if (movie.edition) badges.push(`<span class="badge">${esc(movie.edition)}</span>`);
   badges.push(stateBadge(movie));
   if (movie.watched) badges.push('<span class="badge ok">✓ 已看</span>');
+  else if (movie.wish) badges.push('<span class="badge accent">想看</span>');
   if (movie.missing) badges.push('<span class="badge err">文件缺失</span>');
   return badges.join('');
 }
@@ -130,8 +131,11 @@ function drawerHtml(movie) {
       <div class="drawer-actions">
         <button class="btn primary" data-act="detail.play">${icon('play', 14)}本地播放器</button>
         <button class="btn" data-act="detail.browser">${icon('monitor', 14)}浏览器播放</button>
-        <button class="btn ${movie.watched ? '' : 'primary'}" data-act="detail.toggle-watched" title="${movie.watched ? '改为未看' : '标记为已看'}">
-          ${icon(movie.watched ? 'refresh' : 'check', 14)}${movie.watched ? '标记为未看' : '标记为已看'}
+        <button class="btn ${movie.wish ? 'primary' : ''}" data-act="detail.toggle-wish" title="${movie.wish ? '取消想看标记' : '标记为想看（还没看）'}">
+          ${icon('bookmark', 14)}${movie.wish ? '取消想看' : '想看'}
+        </button>
+        <button class="btn ${movie.watched ? 'primary' : ''}" data-act="detail.toggle-watched" title="${movie.watched ? '取消已看标记' : '标记为已看'}">
+          ${icon('check', 14)}${movie.watched ? '取消已看' : '已看'}
         </button>
         <button class="btn" data-act="detail.scrape">${icon('refresh', 14)}重新刮削</button>
         <button class="btn" data-act="detail.match">${icon('link', 14)}手动匹配</button>
@@ -195,7 +199,9 @@ function drawerHtml(movie) {
           <dt>TMDB</dt><dd>${movie.tmdb?.id ? `<a href="https://www.themoviedb.org/movie/${movie.tmdb.id}" target="_blank" rel="noreferrer" style="color:var(--accent)">${movie.tmdb.id}</a>${movie.tmdb.matchScore ? ` · 匹配度 ${Math.round(movie.tmdb.matchScore * 100)}%` : ''}` : '未匹配'}</dd>
           <dt>观看状态</dt><dd>${movie.watched
             ? `<span style="color:var(--ok)">已看</span> · ${fmtDate(movie.watchedAt)}`
-            : '未看'}${movie.playCount ? ` · 播放 ${movie.playCount} 次` : ''}</dd>
+            : movie.wish
+              ? `<span style="color:var(--accent)">想看</span> · ${fmtDate(movie.wishAt)}`
+              : '未看'}${movie.playCount ? ` · 播放 ${movie.playCount} 次` : ''}</dd>
           <dt>封面来源</dt><dd>${movie.customPoster
             ? `自定义截帧（${esc(customSourceLabel(movie.customPoster.source))}${movie.customPoster.width ? ` · ${movie.customPoster.width}×${movie.customPoster.height ?? '?'}` : ''}）`
             : movie.localArt?.poster
@@ -427,7 +433,17 @@ registerActions({
     const updated = await api.patchMovie(movie.id, { watched: next });
     state.currentMovie = updated;
     drawer.innerHTML = drawerHtml(updated);
-    toast(next ? '已标记为已看' : '已改回未看', 'ok');
+    toast(next ? '已标记为已看（会在「已看电影」里）' : '已取消已看标记', 'ok');
+    await runtime.refreshHealth();
+    runtime.reload();
+  },
+  'detail.toggle-wish': async () => {
+    const movie = state.currentMovie;
+    const next = !movie.wish;
+    const updated = await api.patchMovie(movie.id, { wish: next });
+    state.currentMovie = updated;
+    drawer.innerHTML = drawerHtml(updated);
+    toast(next ? '已标记为想看（会在「想看」里）' : '已取消想看标记', 'ok');
     await runtime.refreshHealth();
     runtime.reload();
   },

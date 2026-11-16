@@ -227,6 +227,8 @@ function summarize(movie) {
     resumeSec: movie.resumeSec ?? 0,
     watched: Boolean(movie.watchedAt),
     watchedAt: movie.watchedAt ?? null,
+    wish: Boolean(movie.wishAt),
+    wishAt: movie.wishAt ?? null,
     addedAt: movie.addedAt ?? null,
     lastSeenAt: movie.lastSeenAt ?? null,
     parsedTitle: movie.parsed?.title ?? null,
@@ -374,10 +376,12 @@ function facetsOf(movies) {
   let totalBytes = 0;
   let missing = 0;
   let watched = 0;
+  let wish = 0;
   for (const movie of movies) {
     totalBytes += Number(movie.size) || 0;
     if (movie.missing) missing += 1;
     if (movie.watchedAt) watched += 1;
+    if (movie.wishAt) wish += 1;
     states[movie.matchState ?? 'pending'] = (states[movie.matchState ?? 'pending'] ?? 0) + 1;
     for (const tag of movie.tags ?? []) tags.set(tag, (tags.get(tag) ?? 0) + 1);
     for (const name of movie.collections ?? []) collections.set(name, (collections.get(name) ?? 0) + 1);
@@ -399,6 +403,7 @@ function facetsOf(movies) {
     totalBytes,
     missing,
     watched,
+    wish,
     unwatched: movies.length - watched,
     states,
     tags: toList(tags),
@@ -945,6 +950,82 @@ route('GET', '/api/watchlist/:id/poster', async ({ req, res, params }) => {
   return undefined;
 });
 
+/**
+ * 观看状态视图：把「本地文件」和「外部清单」合成一个列表。
+ *
+ * 「已有电影」是来源维度（本地有没有文件），想看/已看是状态维度，两者交叉：
+ *   - 本地已看的片子属于「已看电影」，同时也在「已有电影」里
+ *   - 本地标了想看的、清单里想看的，都进「想看」
+ *
+ * @param {'wish'|'watched'} status
+ */
+route('GET', '/api/collection/:status', async ({ params }) => {
+  const status = String(params.status);
+  if (!['wish', 'watched'].includes(status)) {
+    throw new HttpError(400, 'status 只能是 wish 或 watched');
+  }
+  const field = status === 'watched' ? 'watchedAt' : 'wishAt';
+
+  const libraryItems = library.list()
+    .filter((movie) => movie[field] && !movie.missing)
+    .map((movie) => {
+      const video = movie.probe?.video ?? null;
+      return {
+        id: movie.id,
+        source: 'library',
+        movieId: movie.id,
+        title: displayTitle(movie),
+        year: displayYear(movie),
+        voteAverage: movie.tmdb?.voteAverage ?? null,
+        genres: movie.tmdb?.genres ?? [],
+        runtimeMin: movie.probe?.durationSec ? Math.round(movie.probe.durationSec / 60) : null,
+        overview: movie.tmdb?.overview ?? '',
+        tmdbId: movie.tmdb?.id ?? null,
+        hasFile: true,
+        resolution: video ? `${video.width}×${video.height}` : movie.parsed?.resolution ?? null,
+        size: Number(movie.size) || 0,
+        posterUrl: `/api/movies/${encodeURIComponent(movie.id)}/poster`,
+        status,
+        watchedAt: movie.watchedAt ?? null,
+        wishAt: movie.wishAt ?? null,
+        note: movie.notes ?? '',
+      };
+    });
+
+  const externalItems = watchlist.list()
+    .filter((item) => item.status === status)
+    .map((item) => ({
+      id: item.id,
+      source: 'watchlist',
+      movieId: null,
+      title: item.title,
+      year: item.year,
+      voteAverage: item.voteAverage ?? null,
+      genres: item.genres ?? [],
+      runtimeMin: item.runtimeMin ?? null,
+      overview: item.overview ?? '',
+      tmdbId: item.tmdbId ?? null,
+      hasFile: false,
+      resolution: null,
+      size: 0,
+      posterUrl: item.tmdbId ? `/api/watchlist/${encodeURIComponent(item.id)}/poster` : null,
+      status,
+      watchedAt: status === 'watched' ? item.updatedAt ?? item.createdAt ?? null : null,
+      wishAt: status === 'wish' ? item.createdAt ?? null : null,
+      note: item.note ?? '',
+    }));
+
+  const items = [...libraryItems, ...externalItems]
+    .sort((a, b) => String(b[field] ?? '').localeCompare(String(a[field] ?? '')));
+
+  return {
+    status,
+    items,
+    total: items.length,
+    counts: { library: libraryItems.length, external: externalItems.length },
+  };
+});
+
 route('GET', '/api/movies/:id', async ({ params }) => {
   const movie = library.get(params.id);
   if (!movie) throw new HttpError(404, '记录不存在');
@@ -1077,8 +1158,18 @@ route('PATCH', '/api/movies/:id', async ({ params, body }) => {
     const nextWatched = Boolean(body.watched);
     if (nextWatched) {
       changes.watchedAt = movie.watchedAt ?? new Date().toISOString();
+      changes.wishAt = null; // 想看和已看互斥
     } else {
       changes.watchedAt = null;
+    }
+  }
+  // 想看：本地有文件但还没看，先记下来
+  if (body?.wish !== undefined) {
+    if (body.wish) {
+      changes.wishAt = movie.wishAt ?? new Date().toISOString();
+      changes.watchedAt = null;
+    } else {
+      changes.wishAt = null;
     }
   }
   if (body?.tmdb === null) {
