@@ -119,8 +119,9 @@ export function openWatchDetail(item, options = {}) {
 
 function rerender(next) {
   current = next;
+  const scroll = drawer.scrollTop;
   drawer.innerHTML = drawerHtml(next);
-  drawer.scrollTop = 0;
+  drawer.scrollTop = scroll;
   bindPoster();
 }
 

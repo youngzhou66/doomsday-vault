@@ -744,14 +744,40 @@ textarea.notes:focus { border-color: var(--accent-line); }
   .view-title { font-size: 18px; }
   .view-sub { font-size: 11px; }
 
-  .filters { gap: 6px; margin-bottom: 12px; }
-  .field { height: 30px; }
-  .field > span, .field select, .field input { font-size: 11px; }
-  .seg button { padding: 4px 8px; font-size: 11px; }
-  .btn { height: 30px; padding: 0 10px; font-size: 11.5px; }
+  /* 触摸目标：移动端按钮 ≥40px 高，避免手指点不中 */
+  .filters {
+    gap: 8px; margin-bottom: 12px;
+    flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain;
+    padding-bottom: 2px; scrollbar-width: none;
+  }
+  .filters::-webkit-scrollbar { display: none; }
+  .filters > * { flex: 0 0 auto; }
+  .field { height: 40px; }
+  .field > span, .field select, .field input { font-size: 12px; }
+  .seg { padding: 3px; }
+  .seg button { padding: 0 12px; min-height: 34px; font-size: 12px; }
+  .btn { height: auto; min-height: 40px; padding: 0 14px; font-size: 12.5px; }
+  .btn.sm { min-height: 36px; padding: 6px 10px; font-size: 12px; }
+  .btn.icon { min-height: 40px; min-width: 40px; padding: 0 10px; }
+  .nav-item { min-height: 44px; }
+  .drawer-actions .btn { min-height: 42px; }
+  .drawer-actions { gap: 8px; }
+  .wish-actions .btn { min-height: 36px; }
+  .card, .wish-card { -webkit-tap-highlight-color: rgba(224, 164, 88, 0.14); }
 
   .grid { gap: 12px 10px; }
   .card-meta { font-size: 10px; gap: 2px 4px; }
   /* 小屏上圆点分隔符既占宽又容易掉到行首，靠 gap 分隔即可 */
   .card-meta .dot { display: none; }
+}
+
+/* 触摸设备：去掉 hover 位移（iOS 上会让第一次点击只触发 hover），改用按下的反馈 */
+@media (hover: none) {
+  .card:hover, .wish-card:hover {
+    transform: none; box-shadow: none; border-color: var(--line-soft);
+  }
+  .card:active, .wish-card:active { transform: scale(0.985); border-color: var(--accent-line); }
+  .btn:hover { filter: none; transform: none; }
+  .btn:active { filter: brightness(0.9); transform: translateY(1px); }
+  .seg button:active, .nav-item:active { background: var(--panel-3); }
 }

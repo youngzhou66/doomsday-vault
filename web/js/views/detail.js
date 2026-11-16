@@ -246,6 +246,13 @@ async function refresh() {
   if (state.currentMovie) await openDetail(state.currentMovie.id);
 }
 
+/** 重渲染抽屉时保留滚动位置：移动端点完按钮不能被弹回顶部。 */
+function renderDrawer(movie) {
+  const scroll = drawer.scrollTop;
+  drawer.innerHTML = drawerHtml(movie);
+  drawer.scrollTop = scroll;
+}
+
 /* ── 浏览器截帧（服务端没有 ffmpeg / 系统缩略图时的兜底） ──── */
 /**
  * 用 <video> + canvas 截一帧，回传 dataURL。
@@ -432,7 +439,7 @@ registerActions({
     const next = !movie.watched;
     const updated = await api.patchMovie(movie.id, { watched: next });
     state.currentMovie = updated;
-    drawer.innerHTML = drawerHtml(updated);
+    renderDrawer(updated);
     toast(next ? '已标记为已看（会在「已看电影」里）' : '已取消已看标记', 'ok');
     await runtime.refreshHealth();
     runtime.reload();
@@ -442,7 +449,7 @@ registerActions({
     const next = !movie.wish;
     const updated = await api.patchMovie(movie.id, { wish: next });
     state.currentMovie = updated;
-    drawer.innerHTML = drawerHtml(updated);
+    renderDrawer(updated);
     toast(next ? '已标记为想看（会在「想看」里）' : '已取消想看标记', 'ok');
     await runtime.refreshHealth();
     runtime.reload();
@@ -456,7 +463,7 @@ registerActions({
   'detail.probe': async () => {
     const updated = await api.probe(state.currentMovie.id);
     state.currentMovie = updated;
-    drawer.innerHTML = drawerHtml(updated);
+    renderDrawer(updated);
     toast('探测完成', 'ok');
   },
   'detail.add-tag': async (form) => {
@@ -467,7 +474,7 @@ registerActions({
     const tags = [...new Set([...(movie.tags ?? []), tag])];
     const updated = await api.patchMovie(movie.id, { tags });
     state.currentMovie = updated;
-    drawer.innerHTML = drawerHtml(updated);
+    renderDrawer(updated);
     await runtime.refreshHealth();
   },
   'detail.remove-tag': async (element) => {
@@ -475,7 +482,7 @@ registerActions({
     const tags = (movie.tags ?? []).filter((tag) => tag !== element.dataset.tag);
     const updated = await api.patchMovie(movie.id, { tags });
     state.currentMovie = updated;
-    drawer.innerHTML = drawerHtml(updated);
+    renderDrawer(updated);
     await runtime.refreshHealth();
   },
   'detail.add-collection': async (form) => {
@@ -486,7 +493,7 @@ registerActions({
     const collections = [...new Set([...(movie.collections ?? []), name])];
     const updated = await api.patchMovie(movie.id, { collections });
     state.currentMovie = updated;
-    drawer.innerHTML = drawerHtml(updated);
+    renderDrawer(updated);
     await runtime.refreshHealth();
   },
   'detail.remove-collection': async (element) => {
@@ -494,7 +501,7 @@ registerActions({
     const collections = (movie.collections ?? []).filter((name) => name !== element.dataset.name);
     const updated = await api.patchMovie(movie.id, { collections });
     state.currentMovie = updated;
-    drawer.innerHTML = drawerHtml(updated);
+    renderDrawer(updated);
     await runtime.refreshHealth();
   },
   'detail.save-notes': async () => {
