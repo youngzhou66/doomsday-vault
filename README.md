@@ -264,17 +264,20 @@ data/
 
 ### 三个页面怎么分工
 
+**「已有电影」是来源维度，想看/已看是状态维度，两者交叉**——所以同一部片子会同时出现在两个页面上，这不是重复数据。
+
 | 页面 | 放什么 | 数据来源 |
 | --- | --- | --- |
-| **已有电影** | 本地硬盘上有文件的片子 | 扫描 `library.json` |
-| **想看** | 想看、但还没下载 / 还没整理的片子 | TMDB 或手动添加，`watchlist.json` 里 `status: wish` |
-| **已看电影** | 看过、但本地没留（或还没下载）的片子 | TMDB 或手动添加，`status: watched` |
+| **已有电影** | 本地硬盘上有文件的**全部**片子（可能未看、想看或已看） | 扫描 `library.json` |
+| **想看** | 所有标了想看的片子：本地有的 + 本地没有的 | `library.json` 的 `wishAt` + `watchlist.json` 的 `status: wish` |
+| **已看电影** | 所有标了已看的片子：本地有的 + 本地没有的 | `library.json` 的 `watchedAt` + `watchlist.json` 的 `status: watched` |
 
-- 主库里已经手动标「已看」的片子**不会**出现在「已看电影」页（它们有本地文件，留在「已有电影」里，卡片带绿勾）；「已看电影」页顶部会提示主库另有几部已看，避免你以为是丢了数据。
-- 三个页面靠 **TMDB 编号**自动比对：清单里的片子在主库已有文件时，卡片显示「已在库中」。
-- 两个清单页都支持「添加 → 搜 TMDB → 选候选」，加入后标题、原名、年份、评分、类型、简介写进 `watchlist.json`，海报下载到 `cache/images/`，断网可读；也可以不联网只记片名，之后点「补全」。
+- 标记入口：**本地影片**在详情页点「想看」/「已看」（互斥，点第二次取消）；**本地没有的片子**在「想看 / 已看电影」页点「从 TMDB 添加」，加入时直接落到对应状态。
+- 两个状态视图由 `GET /api/collection/:status` 合并两个来源，卡片上会标「**本地文件**」或「**清单**」，本地片可以一键打开详情。
+- 主库与清单靠 **TMDB 编号**自动比对：清单里的片子在主库已有文件时显示「已在库中」。
+- 清单条目支持「添加 → 搜 TMDB → 选候选」，标题/原名/年份/评分/类型/简介写进 `watchlist.json`，海报下载到 `cache/images/`，断网可读；也可以不联网只记片名，之后点「补全」。
 
-> 「想看 / 已看电影」和主库是两套数据：主库记录必须对应一个本地文件，清单不需要。所以扫描、查重、校验永远不会被清单里的条目干扰。
+> 「想看 / 已看电影」里的清单条目和主库是两套数据：主库记录必须对应一个本地文件，清单不需要。扫描、查重、校验永远不会被清单里的条目干扰。
 
 ### 断网还能用吗？——能，这是设计前提
 
@@ -328,6 +331,7 @@ data/
   "tags": ["收藏"], "collections": ["教父三部曲"], "notes": "",
   "resumeSec": 3600, "playCount": 2, "missing": false,
   "watchedAt": "2026-10-18T10:18:05.712Z",   // null = 未看
+  "wishAt": null,                            // 想看标记（与 watchedAt 互斥）
   "customPoster": { "file": "custom-m_xxx.jpg", "source": "shell", "width": 500, "height": 281 },
   "addedAt": "...", "updatedAt": "...", "lastSeenAt": "..."
 }
@@ -395,7 +399,7 @@ ffmpeg =ok   <新路径>/tools/ffmpeg/ffmpeg.exe
 | GET | `/api/jobs`、`/api/jobs/:id` | 任务列表 / 进度轮询 |
 | DELETE | `/api/jobs/:id` | 取消任务 |
 | GET | `/api/movies` | 列表：`q/sort/dir/state/resolution/tag/collection/root/missing/watched/limit/offset`（`sort` 支持 `watchedAt`） |
-| GET/PATCH/DELETE | `/api/movies/:id` | 详情 / 改标签合集备注状态、`watched: true\|false` / 仅移出库 |
+| GET/PATCH/DELETE | `/api/movies/:id` | 详情 / 改标签合集备注状态、`watched: true\|false`、`wish: true\|false`（互斥）/ 仅移出库 |
 | POST | `/api/movies/bulk` | 批量：`addTag`、`addCollection`、`confirm`、`pending`、`watched`、`unwatched`、`remove` |
 | POST | `/api/movies/:id/scrape` | 重新刮削（`force` 忽略缓存） |
 | POST | `/api/movies/:id/match` | 手动指定 TMDB id |
@@ -424,6 +428,7 @@ ffmpeg =ok   <新路径>/tools/ffmpeg/ffmpeg.exe
 | POST | `/api/watchlist/:id/refresh` | 重新拉元数据；自动匹配没把握时返回 `needPick` + 候选列表 |
 | POST | `/api/watchlist/:id/link` | 手动指定 TMDB 编号（配合 `needPick`） |
 | GET | `/api/watchlist/:id/poster` | 清单条目海报（无缓存或未关联 TMDB 时 404） |
+| GET | `/api/collection/:status` | 状态视图：`wish` / `watched`，合并主库标记与清单条目，带 `source`、`hasFile` |
 | POST | `/api/verify` | 完整性校验任务（`deep` 重算指纹） |
 | POST | `/api/library/import` | 合并导入 JSON |
 | GET | `/api/preview-parse` | 解析预览（调规则时很好用） |
