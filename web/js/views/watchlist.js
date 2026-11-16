@@ -16,6 +16,7 @@ import { esc, fmtBytes, icon, toast } from '../util.js';
 const PAGES = {
   wish: {
     title: '想看',
+    status: 'wish',
     hint: '汇总所有「想看」的片子：本地已有的（在「已有电影」详情页点「想看」）+ 从 TMDB 加进清单的。',
     emptyTitle: '还没有想看标记',
     emptyHint: '在「已有电影」的详情页点「想看」，或者点右上角从 TMDB 添加一部。',
@@ -26,6 +27,7 @@ const PAGES = {
   },
   watched: {
     title: '已看电影',
+    status: 'watched',
     hint: '汇总所有「看过」的片子：本地已看的（同时仍在「已有电影」里）+ 看过但本地没留、从 TMDB 加进清单的。',
     emptyTitle: '还没有已看标记',
     emptyHint: '在「已有电影」的详情页点「已看」，或者点右上角补一部看过但本地没留的片子。',
@@ -145,7 +147,7 @@ export function renderCollection(root, options = {}) {
 
 async function loadCollection() {
   try {
-    const result = await api.collection(config().status === 'watched' ? 'watched' : 'wish');
+    const result = await api.collection(config().status);
     items = result.items ?? [];
     renderBody();
     await runtime.refreshHealth();
