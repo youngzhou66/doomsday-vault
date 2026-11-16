@@ -1,29 +1,49 @@
-/** 想看清单：先把片子记下来，元数据从 TMDB 拉一次就缓存在本地。 */
+/**
+ * 片单：想看 / 已看电影。
+ *
+ * 这两个页面共用一套数据（data/watchlist.json），区别只是 status：
+ *   wish    —— 还没看
+ *   watched —— 看过了（本地不一定有文件）
+ *
+ * 主库里的记录不在这里：主库每条都对应一个本地文件，已看标记在那边用绿勾表示。
+ * 两边靠 TMDB 编号自动比对，清单里出现主库已有的片子时会显示「已在库中」。
+ */
 import { api } from '../api.js';
 import { hideModal, showModal } from '../modal.js';
 import { registerActions, runtime, state } from '../state.js';
 import { esc, icon, toast } from '../util.js';
 
-const STATUS_LABEL = { wish: '想看', watched: '已看', owned: '已入库' };
-const STATUS_BADGE = { wish: 'accent', watched: 'ok', owned: '' };
-const FILTERS = [
-  ['all', '全部'],
-  ['wish', '想看'],
-  ['watched', '已看'],
-  ['owned', '已入库'],
-];
+const PAGES = {
+  wish: {
+    title: '想看',
+    status: 'wish',
+    otherStatus: 'watched',
+    addTitle: '添加想看的电影',
+    hint: '这里放「还没下载 / 还没整理」的片子。从 TMDB 加进来会把标题、年份、评分、简介和海报缓存在本地，断网也能看；本地有了文件后会自动显示「已在库中」。',
+    emptyTitle: '想看清单还是空的',
+    emptyHint: '点右上角「添加」，从 TMDB 搜一部；或者直接手动记个片名。',
+    toggleLabel: '已看',
+    toggleTitle: '标记为已看，移到「已看电影」',
+  },
+  watched: {
+    title: '已看电影',
+    status: 'watched',
+    otherStatus: 'wish',
+    addTitle: '添加已看的电影',
+    hint: '这里放「看过、但本地没有留（或还没下载）」的片子，可以直接从 TMDB 加。本地已有的片子请直接在「已有电影」里标已看，两边不会重复。',
+    emptyTitle: '还没有记录',
+    emptyHint: '看过但本地没留的片子，点右上角「添加」从 TMDB 补进来。',
+    toggleLabel: '改回想看',
+    toggleTitle: '还没看，移回「想看」',
+  },
+};
 
-let filter = 'all';
+let page = 'wish';
 let items = [];
 let pickTargetId = null;
 
-function counts() {
-  return {
-    all: items.length,
-    wish: items.filter((item) => item.status === 'wish').length,
-    watched: items.filter((item) => item.status === 'watched').length,
-    owned: items.filter((item) => item.status === 'owned' || item.owned).length,
-  };
+function config() {
+  return PAGES[page];
 }
 
 function posterHtml(item) {
@@ -40,12 +60,12 @@ function posterHtml(item) {
 }
 
 function cardHtml(item) {
-  const status = item.owned && item.status === 'wish' ? 'owned' : item.status;
   const meta = [
     item.year ?? '—',
     item.runtimeMin ? `${item.runtimeMin} 分钟` : null,
     item.voteAverage ? `★ ${Number(item.voteAverage).toFixed(1)}` : null,
   ].filter(Boolean).join(' · ');
+  const cfg = config();
   return `
     <article class="panel wish-card" data-wish-id="${esc(item.id)}">
       ${posterHtml(item)}
@@ -53,14 +73,12 @@ function cardHtml(item) {
         <h4 class="wish-title" title="${esc(item.title)}">${esc(item.title)}</h4>
         <div class="wish-meta">${esc(meta)}</div>
         <div class="wish-badges">
-          <span class="badge ${STATUS_BADGE[status] ?? ''}">${item.owned && item.status === 'wish' ? '已在库中' : STATUS_LABEL[status] ?? '想看'}</span>
+          <span class="badge ${item.owned ? 'ok' : 'accent'}">${item.owned ? '已在库中' : (item.status === 'watched' ? '已看' : '想看')}</span>
           ${item.tmdbId ? `<span class="badge">TMDB ${item.tmdbId}</span>` : '<span class="badge err">未关联 TMDB</span>'}
         </div>
         <div class="wish-actions">
-          <button class="btn sm" data-act="wish.status" data-id="${esc(item.id)}" data-status="${item.status === 'watched' ? 'wish' : 'watched'}"
-            title="${item.status === 'watched' ? '改回想看' : '标记已看'}">${icon('check', 12)}${item.status === 'watched' ? '取消已看' : '已看'}</button>
-          <button class="btn sm" data-act="wish.status" data-id="${esc(item.id)}" data-status="${item.status === 'owned' ? 'wish' : 'owned'}"
-            title="${item.status === 'owned' ? '改回想看' : '标记为已入库'}">${icon('library', 12)}${item.status === 'owned' ? '取消入库' : '入库'}</button>
+          <button class="btn sm" data-act="wish.status" data-id="${esc(item.id)}" data-status="${cfg.otherStatus}"
+            title="${esc(cfg.toggleTitle)}">${icon('check', 12)}${esc(cfg.toggleLabel)}</button>
           ${item.tmdbId ? '' : `<button class="btn sm" data-act="wish.refresh" data-id="${esc(item.id)}" title="用片名搜一次 TMDB，补全元数据">${icon('refresh', 12)}补全</button>`}
           <button class="btn sm ghost" data-act="wish.remove" data-id="${esc(item.id)}" title="从清单删除">${icon('trash', 12)}</button>
         </div>
@@ -69,28 +87,29 @@ function cardHtml(item) {
     </article>`;
 }
 
-function filtered() {
-  if (filter === 'all') return items;
-  if (filter === 'owned') return items.filter((item) => item.status === 'owned' || item.owned);
-  return items.filter((item) => item.status === filter);
+function mainLibraryWatchedHint() {
+  if (page !== 'watched') return '';
+  const watchedLocal = state.health?.facets?.watched ?? 0;
+  if (!watchedLocal) return '';
+  return `<div class="hint" style="margin-bottom:14px">${icon('info', 14)}
+    <span>「已有电影」里另有 <b>${watchedLocal}</b> 部标了已看的片子（本地有文件），不在这里重复显示。</span>
+  </div>`;
 }
 
 function bodyHtml() {
-  const list = filtered();
+  const cfg = config();
   if (!items.length) {
-    return `<div class="empty"><h3>清单还是空的</h3>
-      <p>点右上角「添加」，从 TMDB 搜一部；或者直接手动记个片名。</p>
-      <button class="btn primary" data-act="wish.add">${icon('plus', 14)}添加想看的电影</button></div>`;
+    return `<div class="empty"><h3>${esc(cfg.emptyTitle)}</h3>
+      <p>${esc(cfg.emptyHint)}</p>
+      <button class="btn primary" data-act="wish.add">${icon('plus', 14)}${esc(cfg.addTitle)}</button></div>`;
   }
-  if (!list.length) return '<div class="empty"><h3>这个状态下没有条目</h3><p>换个筛选看看。</p></div>';
-  return `<div class="wish-grid">${list.map(cardHtml).join('')}</div>`;
+  return `${mainLibraryWatchedHint()}<div class="wish-grid">${items.map(cardHtml).join('')}</div>`;
 }
 
 function renderBody() {
   const body = document.getElementById('wish-body');
   if (!body) return;
   body.innerHTML = bodyHtml();
-  // 海报加载失败时退回占位卡
   for (const img of body.querySelectorAll('[data-watch-poster]')) {
     img.addEventListener('load', () => img.classList.add('loaded'));
     img.addEventListener('error', () => {
@@ -100,40 +119,31 @@ function renderBody() {
     });
   }
   const countNode = document.getElementById('wish-count');
-  if (countNode) {
-    const c = counts();
-    countNode.textContent = `共 ${c.all} 条 · 想看 ${c.wish} · 已看 ${c.watched} · 已在库 ${c.owned}`;
-  }
-  const filtersNode = document.getElementById('wish-filters');
-  if (filtersNode) {
-    const c = counts();
-    filtersNode.innerHTML = FILTERS.map(([key, label]) => `
-      <button data-act="wish.filter" data-key="${key}" class="${filter === key ? 'active' : ''}">${label} ${c[key] ?? 0}</button>`).join('');
-  }
+  if (countNode) countNode.textContent = `共 ${items.length} 条${page === 'watched' ? ' · 本地没有这些文件' : ''}`;
 }
 
-export function renderWatchlist(root) {
+export function renderWatchlist(root, options = {}) {
+  page = options.status === 'watched' ? 'watched' : 'wish';
+  const cfg = config();
   root.innerHTML = `
     <div class="view-head">
       <div>
-        <h1 class="view-title">想看</h1>
+        <h1 class="view-title">${esc(cfg.title)}</h1>
         <div class="view-sub" id="wish-count">读取中…</div>
       </div>
       <div class="spacer"></div>
-      <div class="seg" id="wish-filters"></div>
       <button class="btn primary" data-act="wish.add">${icon('plus', 13)}添加</button>
     </div>
     <div class="hint" style="margin-bottom:14px">${icon('info', 14)}
-      <span>这里放「还没下载 / 还没整理」的片子。从 TMDB 加进来会把标题、年份、评分、简介和海报缓存在本地，断网也能看；本地有了文件后，右边会显示「已在库中」。</span>
+      <span>${esc(cfg.hint)}</span>
     </div>
     <div id="wish-body"><div class="empty"><h3>读取中…</h3></div></div>`;
-  filter = 'all';
   loadWatchlist();
 }
 
 async function loadWatchlist() {
   try {
-    const result = await api.watchlist();
+    const result = await api.watchlist(config().status);
     items = result.items ?? [];
     renderBody();
     await runtime.refreshHealth();
@@ -172,9 +182,10 @@ function openPickDialog(itemId, candidates, reason) {
 }
 
 function openAddDialog() {
+  const cfg = config();
   const hasKey = state.health?.tmdb?.configured !== false;
   showModal({
-    title: '添加想看的电影',
+    title: cfg.addTitle,
     body: `
       <form class="search-line" data-submit="wish.search">
         <input name="q" placeholder="片名，或 片名 年份" autocomplete="off" ${hasKey ? '' : 'disabled'} />
@@ -186,16 +197,19 @@ function openAddDialog() {
       <form class="search-line" data-submit="wish.manual">
         <input name="title" placeholder="片名" autocomplete="off" />
         <input name="year" placeholder="年份（可选）" inputmode="numeric" style="max-width:120px" />
-        <button class="btn" type="submit">加入清单</button>
+        <button class="btn" type="submit">加入${esc(cfg.title)}</button>
       </form>`,
     footer: '<span class="view-sub">从 TMDB 添加时会顺带缓存海报；没有网络也能手动记片名，之后再补全</span>',
   });
 }
 
-async function addByTmdb(tmdbId) {  try {
-    const result = await api.addToWatchlist({ tmdbId });
+async function addByTmdb(tmdbId) {
+  const status = config().status;
+  try {
+    const result = await api.addToWatchlist({ tmdbId, status });
     hideModal();
-    toast(result.existed ? '这部电影已经清单里了' : `已加入：${result.item.title}`, result.existed ? '' : 'ok');
+    const where = status === 'watched' ? '已看电影' : '想看';
+    toast(result.existed ? '这部电影已经在清单里了' : `已加入${where}：${result.item.title}`, result.existed ? '' : 'ok');
     await loadWatchlist();
   } catch (err) {
     toast(`加入失败：${err.message}`, 'err', 6000);
@@ -204,10 +218,6 @@ async function addByTmdb(tmdbId) {  try {
 
 registerActions({
   'wish.add': () => openAddDialog(),
-  'wish.filter': (element) => {
-    filter = element.dataset.key ?? 'all';
-    renderBody();
-  },
   'wish.search': async (form) => {
     const input = form.querySelector('input[name="q"]');
     const query = input?.value.trim();
@@ -237,9 +247,9 @@ registerActions({
       return;
     }
     try {
-      const result = await api.addToWatchlist({ title, year: Number(year) || null });
+      const result = await api.addToWatchlist({ title, year: Number(year) || null, status: config().status });
       hideModal();
-      toast(result.existed ? '这部电影已经清单里了' : `已加入：${result.item.title}`, result.existed ? '' : 'ok');
+      toast(result.existed ? '这部电影已经在清单里了' : `已加入：${result.item.title}`, result.existed ? '' : 'ok');
       await loadWatchlist();
     } catch (err) {
       toast(`加入失败：${err.message}`, 'err', 6000);
@@ -249,10 +259,11 @@ registerActions({
     const id = element.dataset.id;
     const status = element.dataset.status;
     try {
-      const result = await api.patchWatchlist(id, { status });
-      items = items.map((item) => (item.id === id ? result.item : item));
+      await api.patchWatchlist(id, { status });
+      items = items.filter((item) => item.id !== id);
       renderBody();
-      toast(`已标记为「${STATUS_LABEL[status] ?? status}」`, 'ok');
+      await runtime.refreshHealth();
+      toast(status === 'watched' ? '已移到「已看电影」' : '已移回「想看」', 'ok');
     } catch (err) {
       toast(err.message, 'err');
     }
@@ -264,7 +275,6 @@ registerActions({
     try {
       const result = await api.refreshWatchlist(id);
       if (result.needPick) {
-        // 自动匹配没把握：把候选交给用户挑
         openPickDialog(id, result.candidates ?? [], result.reason);
         element.disabled = false;
         return;
@@ -294,7 +304,7 @@ registerActions({
   'wish.remove': async (element) => {
     const item = items.find((entry) => entry.id === element.dataset.id);
     if (!item) return;
-    if (!window.confirm(`从想看清单里移除「${item.title}」？`)) return;
+    if (!window.confirm(`从清单里移除「${item.title}」？`)) return;
     try {
       await api.deleteFromWatchlist(item.id);
       items = items.filter((entry) => entry.id !== item.id);

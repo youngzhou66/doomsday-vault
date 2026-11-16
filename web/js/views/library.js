@@ -36,7 +36,7 @@ function headInfo() {
     return { title: `状态 · ${label}`, filtered: true };
   }
   if (filters.q) return { title: `搜索 · ${filters.q}`, filtered: true };
-  return { title: '全部电影', filtered: false };
+  return { title: '已有电影', filtered: false };
 }
 
 function option(value, label, current) {

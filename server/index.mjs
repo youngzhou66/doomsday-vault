@@ -824,8 +824,10 @@ async function fetchWatchMetadata(tmdbId, { force = false } = {}) {
   return meta;
 }
 
-route('GET', '/api/watchlist', async () => {
-  const items = await Promise.all(watchlist.list().map((item) => watchItemView(item)));
+route('GET', '/api/watchlist', async ({ query }) => {
+  const status = ['wish', 'watched'].includes(String(query.status ?? '')) ? String(query.status) : null;
+  const source = status ? watchlist.list().filter((item) => item.status === status) : watchlist.list();
+  const items = await Promise.all(source.map((item) => watchItemView(item)));
   return { items, total: items.length, counts: watchlistSummary() };
 });
 

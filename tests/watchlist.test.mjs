@@ -52,6 +52,27 @@ test('想看清单：添加、去重、改状态、删除、落盘重载', async
   assert.equal(third.list().length, 1);
 });
 
+test('想看清单：旧「已入库」状态加载时归一成想看', async (t) => {
+  const { dir, cleanup } = await makeTempDir('dmv-wish3-');
+  t.after(cleanup);
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  await fs.writeFile(path.join(dir, 'watchlist.json'), JSON.stringify({
+    version: 1,
+    items: [
+      { id: 'w_1', tmdbId: 1, title: 'A', status: 'owned' },
+      { id: 'w_2', tmdbId: 2, title: 'B', status: 'watched' },
+    ],
+  }));
+  const list = new Watchlist(dir);
+  await list.load();
+  assert.equal(list.get('w_1').status, 'wish', '已入库不再作为手动状态');
+  assert.equal(list.get('w_2').status, 'watched');
+  // 归一化后应写回文件，避免每次启动重算
+  const file = JSON.parse(await fs.readFile(path.join(dir, 'watchlist.json'), 'utf8'));
+  assert.equal(file.items[0].status, 'wish');
+});
+
 test('想看清单：TMDB 元数据只挑需要的字段', () => {
   const meta = pickMetadata({
     id: 155,

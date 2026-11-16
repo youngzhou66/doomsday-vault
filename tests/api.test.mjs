@@ -266,6 +266,11 @@ test('HTTP 接口端到端', async (t) => {
   assert.equal(wishPatched.payload.item.status, 'watched');
   assert.equal(wishPatched.payload.item.note, '等资源');
 
+  const wishFilteredWatched = await api(base, 'GET', '/api/watchlist?status=watched');
+  assert.equal(wishFilteredWatched.payload.total, 1, '已看电影页按 status 过滤');
+  const wishFilteredWish = await api(base, 'GET', '/api/watchlist?status=wish');
+  assert.equal(wishFilteredWish.payload.total, 0);
+
   const healthWithWish = await api(base, 'GET', '/api/health');
   assert.equal(healthWithWish.payload.watchlist.total, 1);
   assert.equal(healthWithWish.payload.watchlist.watched, 1);

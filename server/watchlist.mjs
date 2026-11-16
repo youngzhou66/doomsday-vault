@@ -14,10 +14,13 @@ import { readJson, shortId, writeJsonAtomic } from './fsx.mjs';
 
 const SCHEMA_VERSION = 1;
 
-/** 状态：wish 想看 / watched 已看 / owned 已入库 */
+/** 状态：wish 想看 / watched 已看 / owned 已入库（旧值，加载时归一成 wish） */
 export const WATCH_STATUS = new Set(['wish', 'watched', 'owned']);
 
 function normalizeStatus(value) {
+  // 「已入库」已经不作为手动状态：主库有没有这部片由 TMDB 编号自动比对，
+  // 旧数据统一回落到 wish，卡片上仍会显示「已在库中」。
+  if (value === 'owned') return 'wish';
   return WATCH_STATUS.has(value) ? value : 'wish';
 }
 
@@ -55,8 +58,14 @@ export class Watchlist {
     const data = await readJson(this.file, null);
     this.items = Array.isArray(data?.items) ? data.items.filter((item) => item?.id) : [];
     for (const item of this.items) {
-      item.status = normalizeStatus(item.status);
+      const next = normalizeStatus(item.status);
+      if (next !== item.status) {
+        item.status = next;
+        this.dirty = true;
+      }
     }
+    // 旧状态归一化后立即落盘，避免每次启动都重算
+    if (this.dirty) await this.flush();
     return { count: this.items.length, version: Number(data?.version) || SCHEMA_VERSION };
   }
 
