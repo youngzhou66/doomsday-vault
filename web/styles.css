@@ -331,7 +331,9 @@ body::before {
 .poster-fallback .pf-mark { position: absolute; top: 16px; left: 16px; font-family: var(--mono); font-size: 9px; letter-spacing: 0.2em; color: #454d5e; }
 .card-body { padding: 9px 10px 11px; display: grid; gap: 3px; }
 .card-title { font-size: 12.8px; font-weight: 570; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.card-meta { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+/* 每段单独 nowrap：卡片窄时整段换行，而不是把 "3.1 GiB" 从中间劈开。 */
+.card-meta > span { white-space: nowrap; }
 .card-meta .dot { width: 2px; height: 2px; border-radius: 50%; background: #4a5160; }
 .card-pending {
   position: absolute; top: 8px; right: 8px;
@@ -701,7 +703,14 @@ textarea.notes:focus { border-color: var(--accent-line); }
 .sidebar-mask { display: none; }
 
 @media (max-width: 940px) {
-  .app { grid-template-columns: 1fr; }
+  /* 必须是 minmax(0, 1fr) 而不是 1fr：1fr 等价于 minmax(auto, 1fr)，
+     轨道下限是内容的 min-content，工具条一宽就把轨道撑出视口，
+     造成整页横向溢出、右侧按钮被裁、网格列数算错。 */
+  .app { grid-template-columns: minmax(0, 1fr); }
+  /* grid item 默认 min-width:auto，工具条/长标题会把轨道撑宽，
+     进而让整页产生横向溢出（手机上前端按钮被裁切、网格列算错）。
+     显式归零才能让 flex-wrap 真正生效。 */
+  .content { min-width: 0; }
   .sidebar {
     position: fixed; top: 0; bottom: 0; left: 0; width: 250px; z-index: 50;
     transform: translateX(-100%); transition: transform 0.2s ease;
@@ -721,4 +730,28 @@ textarea.notes:focus { border-color: var(--accent-line); }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* ── 手机（≤600px）──────────────────────────────────────
+   940px 那档只负责「侧栏变抽屉」，卡片和工具条仍按平板尺寸排。
+   手机竖屏 375~430px 下：字号、间距、卡片元信息都要再收一档，
+   否则卡片底部的「3.1 GiB」会被挤到第二行、筛选器占掉半屏。 */
+@media (max-width: 600px) {
+  .topbar { padding: 0 12px; gap: 8px; }
+  .content { padding: 12px 12px 64px; }
+
+  .view-head { gap: 10px; margin-bottom: 12px; }
+  .view-title { font-size: 18px; }
+  .view-sub { font-size: 11px; }
+
+  .filters { gap: 6px; margin-bottom: 12px; }
+  .field { height: 30px; }
+  .field > span, .field select, .field input { font-size: 11px; }
+  .seg button { padding: 4px 8px; font-size: 11px; }
+  .btn { height: 30px; padding: 0 10px; font-size: 11.5px; }
+
+  .grid { gap: 12px 10px; }
+  .card-meta { font-size: 10px; gap: 2px 4px; }
+  /* 小屏上圆点分隔符既占宽又容易掉到行首，靠 gap 分隔即可 */
+  .card-meta .dot { display: none; }
 }
