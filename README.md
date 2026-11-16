@@ -382,6 +382,112 @@ ffmpeg =ok   <新路径>/tools/ffmpeg/ffmpeg.exe
 
 ---
 
+## 6.6 部署到 Linux 服务器（公网访问）
+
+适合「只当想看/已看电影清单」的用法：服务器上没有本地视频文件，因此「已有电影」会是空的，清单页正常可用，元数据与海报缓存在服务器上。
+
+**实测环境**：Ubuntu 24.04 / 4 核 / 8GB / Node v22，国内机房（DNS 被污染，靠项目自带 DoH 绕行访问 TMDB）。
+
+### 1）装 Node（官方 tarball，不动系统包）
+
+```bash
+VER=$(curl -fsSL https://nodejs.org/dist/index.json | tr ',' '\n' | grep -o '"version":"v22\.[0-9.]*"' | head -1 | cut -d'"' -f4)
+mkdir -p /opt/node
+curl -fsSL "https://nodejs.org/dist/$VER/node-$VER-linux-x64.tar.xz" | tar -xJ -C /opt/node --strip-components=1
+ln -sf /opt/node/bin/node /usr/local/bin/node
+ln -sf /opt/node/bin/npm /usr/local/bin/npm
+node -v   # v22.x
+```
+
+### 2）取代码
+
+```bash
+git clone --depth 1 https://github.com/youngzhou66/doomsday-vault.git /opt/doomsday-vault
+mkdir -p /var/lib/doomsday-vault && chmod 700 /var/lib/doomsday-vault
+```
+
+### 3）环境变量（含访问密码）
+
+```bash
+cat > /etc/doomsday-vault.env <<EOF
+MOVIE_DATA_DIR=/var/lib/doomsday-vault
+HOST=0.0.0.0
+PORT=7788
+AUTH_USER=movie
+AUTH_PASS=$(openssl rand -hex 8)
+EOF
+chmod 600 /etc/doomsday-vault.env
+grep AUTH_PASS /etc/doomsday-vault.env   # 记下密码
+```
+
+### 4）systemd
+
+```bash
+cat > /etc/systemd/system/doomsday-vault.service <<'EOF'
+[Unit]
+Description=Doomsday Vault - movie library
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/doomsday-vault
+EnvironmentFile=/etc/doomsday-vault.env
+ExecStart=/opt/node/bin/node server/index.mjs
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now doomsday-vault
+systemctl status doomsday-vault --no-pager
+```
+
+### 5）放行端口
+
+安全组 / 防火墙加一条 **入站 TCP 7788**（源 `0.0.0.0/0`，或只放你自己的 IP）。不需要 80/443。
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:7788/api/health                          # 401
+curl -s -o /dev/null -w '%{http_code}\n' -u movie:你的密码 http://127.0.0.1:7788/api/health        # 200
+```
+
+### 6）配置 TMDB（服务器上同样能用）
+
+在设置页填 Key，或直接调接口：
+
+```bash
+curl -s -u movie:密码 -X PUT -H 'content-type: application/json' \
+  -d '{"tmdb":{"apiKey":"你的Key"}}' http://127.0.0.1:7788/api/config
+curl -s -u movie:密码 -X POST http://127.0.0.1:7788/api/tmdb/test
+```
+
+返回 `"resolvedVia":"doh:doh.pub"` 就说明服务器 DNS 被污染、但项目已自动改用 DoH 拿到的真实 IP + 原域名 SNI，TMDB 正常可用——**不需要在服务器上装任何代理/梯子**。
+
+### 7）运维命令
+
+```bash
+systemctl restart doomsday-vault     # 重启
+systemctl status doomsday-vault      # 状态
+journalctl -u doomsday-vault -f      # 看日志
+tar czf /root/vault-$(date +%F).tgz -C /var/lib doomsday-vault   # 备份数据（含海报缓存）
+cd /opt/doomsday-vault && git pull && systemctl restart doomsday-vault   # 升级
+```
+
+### 8）安全提醒
+
+- 一定要开 `AUTH_USER`/`AUTH_PASS`（本项目没有多用户权限体系，只有这一层 Basic Auth）；
+- `/etc/doomsday-vault.env` 与 `data/config.json` 里有密码和 TMDB Key，保持 `600`；
+- 服务器上装好公钥后就关掉 SSH 密码登录（`PasswordAuthentication no`）；
+- 用 HTTPS 更稳：可以在这个端口前挂一层 Caddy/nginx 做 TLS 终止（注意别占用已有业务的 443）。
+
+---
+
 ## 7. HTTP API
 
 所有接口都在 `/api` 下，JSON 进 JSON 出；视频流支持 `Range`（边下边播、拖动进度条）。
@@ -517,7 +623,7 @@ set PORT=7799 && npm start                # 或者用环境变量
 ## 12. 测试
 
 ```bash
-npm test        # 126 项，全部通过
+npm test        # 127 项，全部通过
 ```
 
 覆盖范围：
