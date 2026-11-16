@@ -1014,8 +1014,9 @@ route('GET', '/api/collection/:status', async ({ params }) => {
       size: 0,
       posterUrl: item.tmdbId ? `/api/watchlist/${encodeURIComponent(item.id)}/poster` : null,
       status,
-      watchedAt: status === 'watched' ? item.updatedAt ?? item.createdAt ?? null : null,
-      wishAt: status === 'wish' ? item.createdAt ?? null : null,
+      // 优先用用户真实标记时间；老数据没有就回退到创建/更新时间
+      watchedAt: status === 'watched' ? (item.watchedAt ?? item.updatedAt ?? item.createdAt ?? null) : null,
+      wishAt: status === 'wish' ? (item.wishAt ?? item.createdAt ?? null) : null,
       note: item.note ?? '',
       directors: item.directors ?? [],
       originalTitle: item.originalTitle ?? null,
