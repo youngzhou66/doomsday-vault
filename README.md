@@ -448,14 +448,22 @@ systemctl enable --now doomsday-vault
 systemctl status doomsday-vault --no-pager
 ```
 
-### 5）放行端口
+### 5）放行端口 + 登录
 
 安全组 / 防火墙加一条 **入站 TCP 7788**（源 `0.0.0.0/0`，或只放你自己的 IP）。不需要 80/443。
+
+浏览器打开 `http://<服务器IP>:7788` 会看到**页面内的登录页**（不是浏览器原生弹窗），输入 `AUTH_USER` / `AUTH_PASS` 后进入；登录状态用签名 Cookie 保持 7 天，侧栏底部有「退出登录」。
+
+命令行验证（保留 Basic 兼容，方便脚本）：
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:7788/api/health                          # 401
 curl -s -o /dev/null -w '%{http_code}\n' -u movie:你的密码 http://127.0.0.1:7788/api/health        # 200
+curl -s -o /dev/null -w '%{http_code}\n' -H 'Accept: text/html' http://127.0.0.1:7788/             # 200（登录页）
 ```
+
+> 会话密钥在 `data/.session-secret`（首次启动生成，600）。删掉它会让所有已登录的浏览器失效。
+> 登录失败限速：同一 IP 每分钟 6 次。
 
 ### 6）配置 TMDB（服务器上同样能用）
 
