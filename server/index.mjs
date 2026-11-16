@@ -1017,6 +1017,11 @@ route('GET', '/api/collection/:status', async ({ params }) => {
       watchedAt: status === 'watched' ? item.updatedAt ?? item.createdAt ?? null : null,
       wishAt: status === 'wish' ? item.createdAt ?? null : null,
       note: item.note ?? '',
+      directors: item.directors ?? [],
+      originalTitle: item.originalTitle ?? null,
+      fetchedAt: item.fetchedAt ?? null,
+      createdAt: item.createdAt ?? null,
+      ownedBy: ownedRecordsFor(item.tmdbId),
     }));
 
   const items = [...libraryItems, ...externalItems]

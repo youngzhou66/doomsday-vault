@@ -12,6 +12,7 @@ import { api } from '../api.js';
 import { hideModal, showModal } from '../modal.js';
 import { registerActions, runtime, state } from '../state.js';
 import { esc, fmtBytes, icon, toast } from '../util.js';
+import { openWatchDetail } from './watch-detail.js';
 
 const PAGES = {
   wish: {
@@ -77,15 +78,15 @@ function cardHtml(item) {
 
   const actions = item.source === 'library'
     ? `<button class="btn sm" data-act="collection.toggle" data-id="${esc(item.id)}" data-source="library" data-status="${cfg.otherStatus}"
-         title="${esc(cfg.toggleTitle)}">${icon('check', 12)}${esc(cfg.toggleLabel)}</button>
-       <button class="btn sm ghost" data-act="collection.open" data-id="${esc(item.id)}" title="打开详情">${icon('reveal', 12)}详情</button>`
+         title="${esc(cfg.toggleTitle)}">${icon('check', 12)}${esc(cfg.toggleLabel)}</button>`
     : `<button class="btn sm" data-act="collection.toggle" data-id="${esc(item.id)}" data-source="watchlist" data-status="${cfg.otherStatus}"
          title="${esc(cfg.toggleTitle)}">${icon('check', 12)}${esc(cfg.toggleLabel)}</button>
        ${item.tmdbId ? '' : `<button class="btn sm" data-act="wish.refresh" data-id="${esc(item.id)}" title="用片名搜一次 TMDB，补全元数据">${icon('refresh', 12)}补全</button>`}
        <button class="btn sm ghost" data-act="wish.remove" data-id="${esc(item.id)}" title="从清单删除">${icon('trash', 12)}</button>`;
 
   return `
-    <article class="panel wish-card" data-id="${esc(item.id)}" data-source="${item.source}">
+    <article class="panel wish-card" data-id="${esc(item.id)}" data-source="${item.source}"
+      data-act="collection.open-card" role="button" tabindex="0" title="${esc(item.title)} · 点击看详情">
       ${posterHtml(item)}
       <div class="wish-body">
         <h4 class="wish-title" title="${esc(item.title)}">${esc(item.title)}</h4>
@@ -279,6 +280,16 @@ registerActions({
     }
   },
   'collection.open': (element) => runtime.openDetail(element.dataset.id),
+  /** 点卡片（封面/标题）打开详情：本地片走原详情页，清单条目走清单详情抽屉 */
+  'collection.open-card': (element) => {
+    const item = items.find((entry) => entry.id === element.dataset.id && entry.source === element.dataset.source);
+    if (!item) return;
+    if (item.source === 'library') {
+      runtime.openDetail(item.id);
+      return;
+    }
+    openWatchDetail(item, { onChange: () => loadCollection() });
+  },
   'wish.refresh': async (element) => {
     const id = element.dataset.id;
     element.disabled = true;
