@@ -37,6 +37,9 @@ const WEB_DIR = path.join(ROOT_DIR, 'web');
 const DATA_DIR = path.resolve(process.env.MOVIE_DATA_DIR || path.join(ROOT_DIR, 'data'));
 const APP_NAME = '末日电影库';
 const APP_VERSION = '1.0.0';
+// 可选密码保护：部署到公网时用 AUTH_USER / AUTH_PASS 开启（本地不设就不生效）
+const AUTH_USER = String(process.env.AUTH_USER ?? '').trim();
+const AUTH_PASS = String(process.env.AUTH_PASS ?? '');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -528,6 +531,7 @@ route('GET', '/api/health', async () => ({
   counts: library.stats(),
   facets: facetsOf(library.list()),
   watchlist: watchlistSummary(),
+  auth: { enabled: Boolean(AUTH_USER), user: AUTH_USER || null },
   jobs: jobs.running(),
 }));
 
@@ -1652,6 +1656,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
+  if (!checkAuth(req, res)) return;
   const isApi = url.pathname.startsWith('/api/');
   const runner = isApi ? handleApi(req, res, url) : handleStatic(req, res, url);
   runner.catch((err) => {
@@ -1663,6 +1668,35 @@ const server = http.createServer((req, res) => {
 });
 
 // ── 启动 ────────────────────────────────────────────────────────────────
+/**
+ * 可选的 HTTP Basic 认证。
+ * 只有设置了 AUTH_USER 才启用；本地使用不受影响（浏览器会弹一次登录框）。
+ * @returns {boolean} true 表示放行
+ */
+function checkAuth(req, res) {
+  if (!AUTH_USER) return true;
+  const header = String(req.headers.authorization ?? '');
+  if (header.startsWith('Basic ')) {
+    let decoded = '';
+    try {
+      decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
+    } catch {
+      decoded = '';
+    }
+    const index = decoded.indexOf(':');
+    const user = index >= 0 ? decoded.slice(0, index) : decoded;
+    const pass = index >= 0 ? decoded.slice(index + 1) : '';
+    if (user === AUTH_USER && pass === AUTH_PASS) return true;
+  }
+  res.writeHead(401, {
+    'WWW-Authenticate': 'Basic realm="Doomsday Vault", charset="UTF-8"',
+    'Content-Type': 'text/plain; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end('需要登录：请输入部署时配置的用户名和密码。');
+  return false;
+}
+
 /** 解析命令行参数：--port=8080 --host=127.0.0.1 --open --data=路径 */
 function parseCliArgs(argv) {
   const args = { open: false };

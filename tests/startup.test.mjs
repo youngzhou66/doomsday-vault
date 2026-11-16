@@ -79,6 +79,58 @@ test('--port 参数可以换端口启动', async (t) => {
   assert.equal(health.ok, true);
 });
 
+test('AUTH_USER/AUTH_PASS 开启后，未登录一律 401', async (t) => {
+  const { dir, cleanup } = await makeTempDir('dmv-start-auth-');
+  const port = await getFreePort();
+  const child = spawn(process.execPath, [SERVER], {
+    env: {
+      ...process.env,
+      MOVIE_DATA_DIR: dir,
+      PORT: String(port),
+      AUTH_USER: 'demo',
+      AUTH_PASS: 's3cret',
+    },
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  t.after(async () => {
+    child.kill('SIGKILL');
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await cleanup();
+  });
+
+  const base = `http://127.0.0.1:${port}`;
+  await waitFor(async () => {
+    try {
+      const response = await fetch(`${base}/api/health`);
+      return response.status === 401;
+    } catch {
+      return false;
+    }
+  }, { timeout: 20000, interval: 200, label: '带密码的服务启动' });
+
+  const anonymous = await fetch(`${base}/api/health`);
+  assert.equal(anonymous.status, 401);
+  assert.match(anonymous.headers.get('www-authenticate') ?? '', /Basic realm=/);
+
+  const wrong = await fetch(`${base}/api/health`, {
+    headers: { authorization: `Basic ${Buffer.from('demo:wrong').toString('base64')}` },
+  });
+  assert.equal(wrong.status, 401);
+
+  const ok = await fetch(`${base}/api/health`, {
+    headers: { authorization: `Basic ${Buffer.from('demo:s3cret').toString('base64')}` },
+  });
+  assert.equal(ok.status, 200);
+  const health = await ok.json();
+  assert.equal(health.auth.enabled, true);
+  assert.equal(health.auth.user, 'demo');
+
+  // 静态页面同样需要登录
+  const page = await fetch(`${base}/`);
+  assert.equal(page.status, 401);
+});
+
 test('医生脚本：干净环境下体检通过', async (t) => {
   const { dir, cleanup } = await makeTempDir('dmv-doctor-');
   t.after(cleanup);
