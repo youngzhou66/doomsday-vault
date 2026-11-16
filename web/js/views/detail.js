@@ -228,7 +228,8 @@ export async function openDetail(id) {
     const movie = await api.movie(id);
     state.currentMovie = movie;
     drawer.innerHTML = drawerHtml(movie);
-    drawer.scrollTop = 0;
+    const scroller = drawer.querySelector('.drawer-body');
+    if (scroller) scroller.scrollTop = 0;
   } catch (err) {
     drawer.innerHTML = `<div class="empty" style="margin:20px"><h3>读取失败</h3><p>${esc(err.message)}</p>
       <button class="btn" data-act="detail.close">关闭</button></div>`;
@@ -248,9 +249,12 @@ async function refresh() {
 
 /** 重渲染抽屉时保留滚动位置：移动端点完按钮不能被弹回顶部。 */
 function renderDrawer(movie) {
-  const scroll = drawer.scrollTop;
+  // 真正的滚动容器是 .drawer-body，不是 #drawer（后者 overflow: visible）
+  const scroller = drawer.querySelector('.drawer-body');
+  const scroll = scroller ? scroller.scrollTop : 0;
   drawer.innerHTML = drawerHtml(movie);
-  drawer.scrollTop = scroll;
+  const next = drawer.querySelector('.drawer-body');
+  if (next) next.scrollTop = scroll;
 }
 
 /* ── 浏览器截帧（服务端没有 ffmpeg / 系统缩略图时的兜底） ──── */

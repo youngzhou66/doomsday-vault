@@ -113,15 +113,19 @@ export function openWatchDetail(item, options = {}) {
   lastFocus = document.activeElement;
   drawer.hidden = false;
   drawer.innerHTML = drawerHtml(item);
-  drawer.scrollTop = 0;
+  const scroller = drawer.querySelector('.drawer-body');
+  if (scroller) scroller.scrollTop = 0;
   bindPoster();
 }
 
 function rerender(next) {
   current = next;
-  const scroll = drawer.scrollTop;
+  // 滚动容器是 .drawer-body
+  const scroller = drawer.querySelector('.drawer-body');
+  const scroll = scroller ? scroller.scrollTop : 0;
   drawer.innerHTML = drawerHtml(next);
-  drawer.scrollTop = scroll;
+  const nextScroller = drawer.querySelector('.drawer-body');
+  if (nextScroller) nextScroller.scrollTop = scroll;
   bindPoster();
 }
 
