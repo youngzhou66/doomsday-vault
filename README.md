@@ -118,6 +118,7 @@ D:\电影\                                  ← 根目录（depth=1）
 | 重复文件检测 | 先按体积分桶，再算「大小 + 首尾各 4MiB」快速指纹；只出报告，永不自动删 |
 | 标签和合集 | 记录级数组字段，支持批量加标签/加合集，侧栏按热度列出 |
 | 已看 / 未看 | 详情页手动标记（记录标记时间），批量标记，卡片右下角绿勾，筛选条「未看 N / 已看 M」一键过滤，可按标记时间排序 |
+| 想看清单 | 本地还没有的片子先记下来：TMDB 搜索加入（标题/年份/评分/简介/海报缓存到本地）或手动记片名；支持想看/已看/已入库，主库有同片时自动显示「已在库中」 |
 | 搜索筛选 | 片名/原名/简介/演员/导演/路径/标签/合集/备注 全文包含匹配；状态、画质、目录、年份、排序、分页 |
 | 详情页 | 右侧抽屉：简介、技术参数、音轨/字幕清单、标签合集编辑、备注、文件路径、元数据来源 |
 | 调用本地播放器 | 预设 mpv / VLC / PotPlayer / MPC / IINA / 系统默认，或自定义命令模板；支持续播位置 `{time}` |
@@ -252,6 +253,7 @@ TMDB 为同一部电影准备了**不同语言的本地化海报**，`poster_pat
 data/
 ├── config.json           # 全部配置（含 TMDB Key，注意别公开这个文件）
 ├── library.json          # 电影库（记录数组 + 版本号）
+├── watchlist.json        # 想看清单（与主库分开存，条目通常没有本地文件）
 ├── cache/
 │   ├── tmdb/*.json       # 搜索/详情响应缓存（默认 30 天）
 │   ├── images/*.jpg      # 海报、背景图、手动匹配缩略图
@@ -259,6 +261,22 @@ data/
 ├── exports/              # 「写入 data/exports」导出的文件
 └── backups/backup-*/      # 快照：config + library + manifest +（默认）整个 cache/
 ```
+
+### 想看清单怎么用
+
+点侧栏「想看」→ 右上角「添加」：
+
+| 添加方式 | 说明 |
+| --- | --- |
+| 搜 TMDB 加入 | 输入片名 → 选候选 → 标题/原名/年份/评分/类型/简介写入 `watchlist.json`，海报下载到 `cache/images/`（渲染不同步、失败也不影响加入） |
+| 手动记片名 | 不联网也能用，只记片名和年份；之后点卡片上的「补全」再搜 TMDB |
+
+- 每条可以标成 **想看 / 已看 / 已入库**，列表顶部按状态筛选；
+- 主库里已经有同一部（TMDB 编号相同）时，卡片会自动显示「**已在库中**」，不用手动标记；
+- 「补全」会自动挑最像的候选；**拿不准时不会乱写**，而是把候选列出来让你自己点（手写译名、上映前的片子经常这样）；
+- 断网后清单照常浏览：元数据在 `watchlist.json`，海报在 `cache/images/`。
+
+> 它和主库是两套数据：主库记录必须对应一个本地文件，清单不需要。所以扫描、查重、校验永远不会被清单里的条目干扰。
 
 ### 断网还能用吗？——能，这是设计前提
 
@@ -403,6 +421,11 @@ ffmpeg =ok   <新路径>/tools/ffmpeg/ffmpeg.exe
 | POST | `/api/export` | 写入 `data/exports/` |
 | POST | `/api/backup`、GET `/api/backups` | 备份 / 备份列表（`includeCache:false` 只备份两个 JSON） |
 | GET | `/api/offline/status` | 离线可用性报告：封面/元数据/探测覆盖率、缓存文件数与体积、缺口清单 |
+| GET/POST | `/api/watchlist` | 想看清单：列表（带 `owned` 主库比对）/ 加入（`{tmdbId}` 走 TMDB 缓存，或 `{title,year}` 纯手动） |
+| PATCH/DELETE | `/api/watchlist/:id` | 改状态 `wish\|watched\|owned`、备注；删除条目 |
+| POST | `/api/watchlist/:id/refresh` | 重新拉元数据；自动匹配没把握时返回 `needPick` + 候选列表 |
+| POST | `/api/watchlist/:id/link` | 手动指定 TMDB 编号（配合 `needPick`） |
+| GET | `/api/watchlist/:id/poster` | 清单条目海报（无缓存或未关联 TMDB 时 404） |
 | POST | `/api/verify` | 完整性校验任务（`deep` 重算指纹） |
 | POST | `/api/library/import` | 合并导入 JSON |
 | GET | `/api/preview-parse` | 解析预览（调规则时很好用） |
@@ -491,7 +514,7 @@ set PORT=7799 && npm start                # 或者用环境变量
 ## 12. 测试
 
 ```bash
-npm test        # 119 项，全部通过
+npm test        # 125 项，全部通过
 ```
 
 覆盖范围：
@@ -500,6 +523,7 @@ npm test        # 119 项，全部通过
 - `config.test.mjs`：默认值、深合并、根目录归一化与去重、深度钳制、Key 打码、幂等
 - `scan.test.mjs`：一片一目录/散片/剧集跳过/体积过滤/深度限制、二次扫描幂等、文件变化后保留标签、失踪标记、停用目录、本地封面图拾取与移除、**忽略后缀（大小写不敏感、只作用于文件名不含扩展名、命中不入库并清理旧记录、不动磁盘文件）**
 - `relocate.test.mjs`：换盘符时改路径前缀、重算 id、保留标签/已看/备注、path 索引同步、目标已存在时跳过不覆盖
+- `watchlist.test.mjs`：想看清单的增删改查、同 TMDB 编号幂等、手动条目 id、状态回落、落盘重载、刷新元数据后改用 TMDB id
 - `art.test.mjs`：本地封面/背景图命名识别（poster/folder/cover、片名专属、同名图）、目录不存在、readdir 缓存、路径还原
 - `dupes.test.mjs`：同内容归组、同体积不同内容不误判、指纹复用、疑似同片、忽略缺失
 - `backup.test.mjs`：CSV 转义与 BOM、JSON 结构、快照+清单+轮转、缺失/体积/指纹三类问题、**备份默认包含 cache/（海报/刮削缓存/自定义封面）且可关闭**

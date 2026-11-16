@@ -7,6 +7,7 @@ import { esc, fmtBytes, icon, toast } from './util.js';
 import { renderLibrary, reloadLibrary } from './views/library.js';
 import { closeDetail, openDetail } from './views/detail.js';
 import { renderQueue } from './views/queue.js';
+import { renderWatchlist } from './views/watchlist.js';
 import { renderDupes } from './views/dupes.js';
 import { renderSettings } from './views/settings.js';
 
@@ -16,6 +17,7 @@ const topbar = document.getElementById('topbar');
 
 export const VIEWS = {
   library: { render: (root) => renderLibrary(root) },
+  watchlist: { render: (root) => renderWatchlist(root) },
   queue: { render: (root) => renderQueue(root) },
   dupes: { render: (root) => renderDupes(root) },
   settings: { render: (root) => renderSettings(root) },
@@ -109,6 +111,7 @@ function sidebarHtml() {
   return `
     <div class="nav-label">资料库</div>
     ${navItem('#/library', 'library', '全部电影', counts.total ?? 0)}
+    ${navItem('#/watchlist', 'bookmark', '想看', state.health?.watchlist?.total ?? 0)}
     ${navItem('#/queue', 'queue', '待确认', counts.pending ?? 0)}
     ${navItem('#/dupes', 'copy', '重复文件', '')}
     ${navItem('#/library?missing=yes', 'warn', '仅缺失', counts.missing ?? 0)}

@@ -245,6 +245,44 @@ test('HTTP 接口端到端', async (t) => {
   const sortedByWatched = await api(base, 'GET', '/api/movies?sort=watchedAt&dir=desc');
   assert.equal(sortedByWatched.payload.items[0].id, first.id);
 
+  // 想看清单：手动添加 → 去重 → 改状态 → 计数 → 删除
+  const wishAdded = await api(base, 'POST', '/api/watchlist', { title: '还没下载的片子', year: 2024 });
+  assert.equal(wishAdded.status, 200);
+  assert.equal(wishAdded.payload.existed, false);
+  assert.match(wishAdded.payload.item.id, /^w_local_/);
+  assert.equal(wishAdded.payload.item.status, 'wish');
+  assert.equal(wishAdded.payload.item.tmdbId, null);
+
+  const wishAgain = await api(base, 'POST', '/api/watchlist', { title: '还没下载的片子', year: 2024 });
+  assert.equal(wishAgain.payload.existed, true);
+  assert.equal(wishAgain.payload.item.id, wishAdded.payload.item.id);
+
+  const wishList = await api(base, 'GET', '/api/watchlist');
+  assert.equal(wishList.payload.total, 1);
+  assert.equal(wishList.payload.items[0].hasPoster, false);
+  assert.equal(wishList.payload.counts.wish, 1);
+
+  const wishPatched = await api(base, 'PATCH', `/api/watchlist/${wishAdded.payload.item.id}`, { status: 'watched', note: '等资源' });
+  assert.equal(wishPatched.payload.item.status, 'watched');
+  assert.equal(wishPatched.payload.item.note, '等资源');
+
+  const healthWithWish = await api(base, 'GET', '/api/health');
+  assert.equal(healthWithWish.payload.watchlist.total, 1);
+  assert.equal(healthWithWish.payload.watchlist.watched, 1);
+
+  const wishBadRequest = await api(base, 'POST', '/api/watchlist', {});
+  assert.equal(wishBadRequest.status, 400);
+
+  const wishPoster = await api(base, 'GET', `/api/watchlist/${wishAdded.payload.item.id}/poster`);
+  assert.equal(wishPoster.status, 404, '没有 TMDB 编号就没有海报');
+
+  const wishRemoved = await api(base, 'DELETE', `/api/watchlist/${wishAdded.payload.item.id}`);
+  assert.equal(wishRemoved.payload.removed, wishAdded.payload.item.id);
+  const wishRemovedAgain = await api(base, 'DELETE', `/api/watchlist/${wishAdded.payload.item.id}`);
+  assert.equal(wishRemovedAgain.status, 404);
+  const wishEmpty = await api(base, 'GET', '/api/watchlist');
+  assert.equal(wishEmpty.payload.total, 0);
+
   // 视频流（Range）
   const ranged = await fetch(`${base}/api/movies/${first.id}/stream`, { headers: { Range: 'bytes=0-99' } });
   assert.equal(ranged.status, 206);

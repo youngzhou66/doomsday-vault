@@ -23,6 +23,7 @@ import { Thumbnailer } from './thumb.mjs';
 import { shellThumbnailSupported } from './osthumb.mjs';
 import { movieIdForFile, previewParse, runScan } from './scan.mjs';
 import { TmdbClient, pickBest, scoreCandidate } from './tmdb.mjs';
+import { Watchlist, pickMetadata } from './watchlist.mjs';
 import { findDuplicates } from './dupes.mjs';
 import { launchPlayer } from './player.mjs';
 import {
@@ -72,6 +73,7 @@ let activeScanId = null;
 
 const tmdb = new TmdbClient({ dataDir: DATA_DIR, getConfig: () => config });
 const thumbnailer = new Thumbnailer({ dataDir: DATA_DIR, getConfig: () => config });
+const watchlist = new Watchlist(DATA_DIR);
 
 // ── HTTP 工具 ───────────────────────────────────────────────────────────
 function sendJson(res, status, payload, headers = {}) {
@@ -520,6 +522,7 @@ route('GET', '/api/health', async () => ({
   player: { preset: config.player.preset, command: config.player.command },
   counts: library.stats(),
   facets: facetsOf(library.list()),
+  watchlist: watchlistSummary(),
   jobs: jobs.running(),
 }));
 
@@ -777,6 +780,167 @@ route('GET', '/api/offline/status', async () => {
       '导出 JSON/CSV、备份、完整性校验、重复检测',
     ],
   };
+});
+
+// ── 想看清单 ────────────────────────────────────────────────────────────
+/** 清单里某条 TMDB 影片，主库中是否已经有对应文件。 */
+function ownedRecordsFor(tmdbId) {
+  if (!tmdbId) return [];
+  return library.list()
+    .filter((movie) => Number(movie.tmdb?.id) === Number(tmdbId))
+    .map((movie) => ({ id: movie.id, title: displayTitle(movie), path: movie.path }));
+}
+
+function watchlistSummary() {
+  const items = watchlist.list();
+  return {
+    total: items.length,
+    wish: items.filter((item) => item.status === 'wish').length,
+    watched: items.filter((item) => item.status === 'watched').length,
+    owned: items.filter((item) => item.status === 'owned').length,
+  };
+}
+
+async function watchItemView(item) {
+  const ownedBy = ownedRecordsFor(item.tmdbId);
+  const hasPoster = item.tmdbId ? await tmdb.hasImage(item.tmdbId, 'poster') : false;
+  return {
+    ...item,
+    owned: ownedBy.length > 0,
+    ownedBy,
+    hasPoster,
+  };
+}
+
+/** 拉一次 TMDB 并写入缓存；海报能下就下，失败不影响清单本身。 */
+async function fetchWatchMetadata(tmdbId, { force = false } = {}) {
+  const detail = await tmdb.detail(tmdbId, { force });
+  const meta = pickMetadata(detail);
+  try {
+    await tmdb.cacheImages({ id: meta.tmdbId, posterPath: meta.posterPath, backdropPath: meta.backdropPath }, { force });
+  } catch {
+    // 海报失败只是没有图，元数据已经拿到
+  }
+  return meta;
+}
+
+route('GET', '/api/watchlist', async () => {
+  const items = await Promise.all(watchlist.list().map((item) => watchItemView(item)));
+  return { items, total: items.length, counts: watchlistSummary() };
+});
+
+/**
+ * 加入想看。
+ *   { tmdbId }        → 拉 TMDB 详情（并缓存海报）
+ *   { title, year? }  → 不联网，只记片名年份
+ */
+route('POST', '/api/watchlist', async ({ body }) => {
+  const tmdbId = Number(body?.tmdbId) || null;
+  if (tmdbId) {
+    if (!tmdb.enabled) throw new HttpError(400, '未配置 TMDB API Key，暂时只能手动添加片名', 'TMDB_NO_KEY');
+    const existing = watchlist.findByTmdb(tmdbId);
+    if (existing) {
+      const item = await watchItemView(existing);
+      return { item, existed: true };
+    }
+    const meta = await fetchWatchMetadata(tmdbId, { force: Boolean(body?.force) });
+    const { item } = watchlist.add({ ...meta, status: body?.status, note: body?.note });
+    await watchlist.flush();
+    return { item: await watchItemView(item), existed: false };
+  }
+
+  const title = String(body?.title ?? '').trim();
+  if (!title) throw new HttpError(400, '请填写片名，或先从 TMDB 选一部');
+  const { item, existed } = watchlist.add({
+    title,
+    year: body?.year,
+    status: body?.status,
+    note: body?.note,
+  });
+  await watchlist.flush();
+  return { item: await watchItemView(item), existed };
+});
+
+route('PATCH', '/api/watchlist/:id', async ({ params, body }) => {
+  const updated = watchlist.patch(params.id, {
+    status: body?.status,
+    note: body?.note,
+    title: body?.title,
+    year: body?.year,
+  });
+  if (!updated) throw new HttpError(404, '清单里没有这条记录');
+  await watchlist.flush();
+  return { item: await watchItemView(updated) };
+});
+
+route('DELETE', '/api/watchlist/:id', async ({ params }) => {
+  const removed = watchlist.remove(params.id);
+  if (!removed) throw new HttpError(404, '清单里没有这条记录');
+  await watchlist.flush();
+  return { removed: params.id };
+});
+
+/** 重新拉一次元数据：有 tmdbId 直接取详情，没有就用片名去搜。 */
+route('POST', '/api/watchlist/:id/refresh', async ({ params, body }) => {
+  const item = watchlist.get(params.id);
+  if (!item) throw new HttpError(404, '清单里没有这条记录');
+  if (!tmdb.enabled) throw new HttpError(400, '未配置 TMDB API Key', 'TMDB_NO_KEY');
+
+  let meta = null;
+  if (item.tmdbId) {
+    meta = await fetchWatchMetadata(item.tmdbId, { force: true });
+  } else {
+    const result = await tmdb.scrape({ title: item.title, year: item.year }, { force: true });
+    if (!result.match) {
+      // 自动选不出来（常见于手写片名/译名差异）：把候选交回去让用户自己挑
+      const candidates = (result.candidates ?? []).slice(0, 8).map((candidate) => ({
+        id: candidate.id,
+        title: candidate.title,
+        originalTitle: candidate.originalTitle ?? null,
+        year: candidate.year ?? null,
+        posterPath: candidate.posterPath ?? null,
+        score: candidate.score ?? 0,
+      }));
+      return {
+        needPick: true,
+        reason: result.reason ?? '没有搜到匹配的影片',
+        candidates,
+      };
+    }
+    meta = pickMetadata(result.match);
+    try {
+      await tmdb.cacheImages({ id: meta.tmdbId, posterPath: meta.posterPath, backdropPath: meta.backdropPath }, { force: true });
+    } catch {
+      // 同上：图没有就算了
+    }
+  }
+
+  const updated = watchlist.patch(item.id, { metadata: meta });
+  await watchlist.flush();
+  return { item: await watchItemView(updated), replaced: updated?.id !== item.id };
+});
+
+/** 手动关联一个 TMDB 条目（补全时用户从候选里挑中的那部）。 */
+route('POST', '/api/watchlist/:id/link', async ({ params, body }) => {
+  const item = watchlist.get(params.id);
+  if (!item) throw new HttpError(404, '清单里没有这条记录');
+  if (!tmdb.enabled) throw new HttpError(400, '未配置 TMDB API Key', 'TMDB_NO_KEY');
+  const tmdbId = Number(body?.tmdbId);
+  if (!tmdbId) throw new HttpError(400, '缺少 tmdbId');
+  const meta = await fetchWatchMetadata(tmdbId);
+  const updated = watchlist.patch(item.id, { metadata: meta });
+  await watchlist.flush();
+  return { item: await watchItemView(updated), replaced: updated?.id !== item.id };
+});
+
+route('GET', '/api/watchlist/:id/poster', async ({ req, res, params }) => {
+  const item = watchlist.get(params.id);
+  if (!item) throw new HttpError(404, '清单里没有这条记录');
+  if (!item.tmdbId) throw new HttpError(404, '这条记录没有 TMDB 海报', 'NO_ART');
+  const file = tmdb.imageFile(item.tmdbId, 'poster');
+  if (!(await pathExists(file))) throw new HttpError(404, '海报还没缓存', 'NO_ART');
+  await serveFile(req, res, file, { contentType: 'image/jpeg', cache: 'private, max-age=86400' });
+  return undefined;
 });
 
 route('GET', '/api/movies/:id', async ({ params }) => {
@@ -1486,6 +1650,8 @@ async function main() {
 
   const loaded = await library.load();
   if (loaded.count) console.log(`[库] 已加载 ${loaded.count} 条记录`);
+  const wishLoaded = await watchlist.load();
+  if (wishLoaded.count) console.log(`[想看] 已加载 ${wishLoaded.count} 条记录`);
   ffprobeState = await detectFfprobe(config.ffprobePath);
   await thumbnailer.refresh({ force: true });
 

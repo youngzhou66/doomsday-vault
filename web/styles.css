@@ -352,6 +352,34 @@ body::before {
   color: #0c1a12;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
 }
+
+/* 想看清单 */
+.wish-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 16px;
+}
+.wish-card {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.wish-card .poster { border-radius: 0; }
+.wish-body { padding: 10px 11px 12px; display: grid; gap: 6px; }
+.wish-title {
+  margin: 0; font-size: 13px; font-weight: 600; line-height: 1.35;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wish-meta { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.wish-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.wish-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.wish-actions .btn { padding: 4px 8px; font-size: 11.5px; }
+.wish-actions .btn svg { width: 12px; height: 12px; }
+.wish-note {
+  font-size: 11.5px; color: var(--muted); line-height: 1.5;
+  border-left: 2px solid var(--line); padding-left: 8px;
+}
 .card-check {
   position: absolute; top: 8px; left: 8px; width: 18px; height: 18px; border-radius: 5px;
   border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(0, 0, 0, 0.45);

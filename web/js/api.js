@@ -84,6 +84,14 @@ export const api = {
   queue: (params) => request('GET', `/api/queue${query(params)}`),
   scrapeQueue: (body) => request('POST', '/api/queue/scrape', body ?? {}),
 
+  watchlist: () => request('GET', '/api/watchlist'),
+  addToWatchlist: (body) => request('POST', '/api/watchlist', body),
+  patchWatchlist: (id, patch) => request('PATCH', `/api/watchlist/${encodeURIComponent(id)}`, patch),
+  deleteFromWatchlist: (id) => request('DELETE', `/api/watchlist/${encodeURIComponent(id)}`),
+  refreshWatchlist: (id) => request('POST', `/api/watchlist/${encodeURIComponent(id)}/refresh`, {}),
+  linkWatchlist: (id, tmdbId) => request('POST', `/api/watchlist/${encodeURIComponent(id)}/link`, { tmdbId }),
+  watchlistPosterUrl: (id) => `${BASE}/api/watchlist/${encodeURIComponent(id)}/poster`,
+
   tmdbSearch: (q, year) => request('GET', `/api/tmdb/search${query({ q, year })}`),
   tmdbTest: () => request('POST', '/api/tmdb/test', {}),
   networkDiagnose: () => request('POST', '/api/network/diagnose', {}),

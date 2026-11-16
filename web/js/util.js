@@ -132,6 +132,7 @@ const ICON_PATHS = {
   queue: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/>',
   tag: '<path d="M3.5 12.2 11 4.7a2 2 0 0 1 1.4-.6H19a1.5 1.5 0 0 1 1.5 1.5v6.6a2 2 0 0 1-.6 1.4l-7.5 7.5a2 2 0 0 1-2.8 0l-6.1-6.1a2 2 0 0 1 0-2.8Z"/><circle cx="16" cy="8" r="1.3"/>',
+  bookmark: '<path d="M6.5 4.5h11v15l-5.5-3.6-5.5 3.6v-15Z"/>',
   layers: '<path d="m12 3 8.5 4.8L12 12.6 3.5 7.8 12 3Z"/><path d="m4 12 8 4.5 8-4.5"/><path d="m4 16.2 8 4.5 8-4.5"/>',
   folder: '<path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4l2 2.4h8A1.5 1.5 0 0 1 20.5 10v7.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5v-10Z"/>',
   sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
