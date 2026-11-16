@@ -1680,6 +1680,16 @@ const server = http.createServer((req, res) => {
 /** 会话密钥：首次启动生成，落在数据目录里，重启后登录状态不丢。 */
 let SESSION_SECRET = '';
 const loginThrottle = new LoginThrottle();
+/**
+ * 密码指纹：参与会话签名。
+ * 这样改了 AUTH_PASS 之后，旧 Cookie 会自动失效（不用手动清浏览器）。
+ */
+let PASSWORD_TAG = '';
+
+function computePasswordTag() {
+  if (!AUTH_PASS) return '';
+  return crypto.createHash('sha256').update(`dmv:${AUTH_PASS}`).digest('hex').slice(0, 16);
+}
 
 async function loadSessionSecret() {
   const file = path.join(DATA_DIR, '.session-secret');
@@ -1699,7 +1709,11 @@ function isAuthenticated(req) {
   if (!AUTH_USER) return true;
   const cookies = parseCookies(req.headers.cookie);
   const token = cookies[SESSION_COOKIE];
-  if (token && SESSION_SECRET && verifySession(token, SESSION_SECRET)) return true;
+  if (token && SESSION_SECRET) {
+    const payload = verifySession(token, SESSION_SECRET);
+    // 用户名或密码改过之后，旧会话直接失效
+    if (payload && payload.u === AUTH_USER && payload.p === PASSWORD_TAG) return true;
+  }
 
   const header = String(req.headers.authorization ?? '');
   if (header.startsWith('Basic ')) {
@@ -1768,7 +1782,7 @@ route('POST', '/api/login', async ({ req, res, body }) => {
     throw new HttpError(401, '用户名或密码不对', 'LOGIN_FAILED');
   }
   loginThrottle.reset(ip);
-  const token = signSession({ u: user }, SESSION_SECRET);
+  const token = signSession({ u: user, p: PASSWORD_TAG }, SESSION_SECRET);
   res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${token}; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}${cookieAttrs}`);
   return { ok: true, auth: true, user };
 });
@@ -1865,6 +1879,7 @@ async function main() {
 
   if (AUTH_USER) {
     SESSION_SECRET = await loadSessionSecret();
+    PASSWORD_TAG = computePasswordTag();
     if (!AUTH_PASS) console.warn('[认证] 已设置 AUTH_USER 但 AUTH_PASS 为空，登录将始终失败');
   }
 

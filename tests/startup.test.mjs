@@ -167,6 +167,70 @@ test('AUTH_USER/AUTH_PASS 开启后：登录页 + Cookie 会话，未登录 API 
   assert.equal(forged.status, 401);
 });
 
+test('改 AUTH_PASS 后，旧会话 Cookie 立即失效', async (t) => {
+  const { dir, cleanup } = await makeTempDir('dmv-start-rotate-');
+  const port = await getFreePort();
+  const base = `http://127.0.0.1:${port}`;
+  const root = { ...process.env, MOVIE_DATA_DIR: dir, PORT: String(port), AUTH_USER: 'demo' };
+
+  let child = spawn(process.execPath, [SERVER], {
+    env: { ...root, AUTH_PASS: 'old-password' },
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  t.after(async () => {
+    child?.kill('SIGKILL');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await cleanup();
+  });
+
+  await waitFor(async () => {
+    try {
+      return (await fetch(`${base}/api/health`)).status === 401;
+    } catch {
+      return false;
+    }
+  }, { timeout: 20000, interval: 200, label: '旧密码实例启动' });
+
+  const login = await fetch(`${base}/api/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: 'demo', password: 'old-password' }),
+  });
+  assert.equal(login.status, 200);
+  const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
+  assert.equal((await fetch(`${base}/api/health`, { headers: { cookie } })).status, 200, '登录后会话有效');
+
+  // 换密码重启（数据目录不变，会话密钥复用）
+  child.kill('SIGKILL');
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  child = spawn(process.execPath, [SERVER], {
+    env: { ...root, AUTH_PASS: 'new-password' },
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+
+  await waitFor(async () => {
+    try {
+      return (await fetch(`${base}/api/health`)).status === 401;
+    } catch {
+      return false;
+    }
+  }, { timeout: 20000, interval: 200, label: '新密码实例启动' });
+
+  assert.equal(
+    (await fetch(`${base}/api/health`, { headers: { cookie } })).status,
+    401,
+    '改密码后旧 Cookie 不应再被接受',
+  );
+  const relogin = await fetch(`${base}/api/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: 'demo', password: 'new-password' }),
+  });
+  assert.equal(relogin.status, 200, '新密码可以登录');
+});
+
 test('医生脚本：干净环境下体检通过', async (t) => {
   const { dir, cleanup } = await makeTempDir('dmv-doctor-');
   t.after(cleanup);
