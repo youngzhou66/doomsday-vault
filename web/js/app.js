@@ -146,6 +146,10 @@ function renderSidebar() {
       </div>
       <div class="stat-row"><span>ffprobe</span><b style="color:${health?.ffprobe?.ok ? 'var(--ok)' : 'var(--err)'}">${health?.ffprobe?.ok ? '就绪' : '缺失'}</b></div>
       <div class="stat-row"><span>TMDB</span><b style="color:${health?.tmdb?.configured ? 'var(--ok)' : 'var(--err)'}">${health?.tmdb?.configured ? '已配置' : '未配置'}</b></div>
+      ${health?.auth?.enabled
+        ? `<div class="stat-row" title="当前登录用户"><span>登录</span><b>${esc(health.auth.user ?? '')}</b></div>
+           <button class="btn sm ghost" style="width:100%;margin-top:8px" data-act="app.logout">${icon('close', 12)}退出登录</button>`
+        : ''}
     `;
   }
   syncNavActive();
@@ -251,8 +255,11 @@ async function refreshHealth() {
 
 /* ── 全局动作 ─────────────────────────────────────────── */
 registerActions({
-  'app.scan': async () => {
-    const { id } = await api.scan();
+  'app.logout': async () => {
+    await api.logout();
+    location.replace('/');
+  },
+  'app.scan': async () => {    const { id } = await api.scan();
     toast('开始扫描电影目录…');
     trackJob(id, {
       onDone: async (job) => {

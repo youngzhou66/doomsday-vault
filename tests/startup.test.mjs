@@ -79,7 +79,7 @@ test('--port 参数可以换端口启动', async (t) => {
   assert.equal(health.ok, true);
 });
 
-test('AUTH_USER/AUTH_PASS 开启后，未登录一律 401', async (t) => {
+test('AUTH_USER/AUTH_PASS 开启后：登录页 + Cookie 会话，未登录 API 401', async (t) => {
   const { dir, cleanup } = await makeTempDir('dmv-start-auth-');
   const port = await getFreePort();
   const child = spawn(process.execPath, [SERVER], {
@@ -109,26 +109,62 @@ test('AUTH_USER/AUTH_PASS 开启后，未登录一律 401', async (t) => {
     }
   }, { timeout: 20000, interval: 200, label: '带密码的服务启动' });
 
+  // API 未登录 → 401 JSON
   const anonymous = await fetch(`${base}/api/health`);
   assert.equal(anonymous.status, 401);
-  assert.match(anonymous.headers.get('www-authenticate') ?? '', /Basic realm=/);
+  assert.equal((await anonymous.json()).error.code, 'UNAUTHORIZED');
 
-  const wrong = await fetch(`${base}/api/health`, {
-    headers: { authorization: `Basic ${Buffer.from('demo:wrong').toString('base64')}` },
+  // 页面未登录 → 直接给登录页（不是浏览器原生弹窗）
+  const loginPage = await fetch(`${base}/`, { headers: { accept: 'text/html' } });
+  assert.equal(loginPage.status, 200);
+  const html = await loginPage.text();
+  assert.match(html, /登录/);
+  assert.match(html, /id="form"/);
+  assert.match(html, /\/api\/login/);
+
+  // 密码错误
+  const wrong = await fetch(`${base}/api/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: 'demo', password: 'wrong' }),
   });
   assert.equal(wrong.status, 401);
 
-  const ok = await fetch(`${base}/api/health`, {
-    headers: { authorization: `Basic ${Buffer.from('demo:s3cret').toString('base64')}` },
+  // 正确登录 → 下发 HttpOnly Cookie
+  const login = await fetch(`${base}/api/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: 'demo', password: 's3cret' }),
   });
-  assert.equal(ok.status, 200);
-  const health = await ok.json();
+  assert.equal(login.status, 200);
+  const setCookie = login.headers.get('set-cookie') ?? '';
+  assert.match(setCookie, /dmv_session=/);
+  assert.match(setCookie, /HttpOnly/);
+  const cookie = setCookie.split(';')[0];
+
+  // 带 Cookie 访问
+  const withCookie = await fetch(`${base}/api/health`, { headers: { cookie } });
+  assert.equal(withCookie.status, 200);
+  const health = await withCookie.json();
   assert.equal(health.auth.enabled, true);
   assert.equal(health.auth.user, 'demo');
 
-  // 静态页面同样需要登录
-  const page = await fetch(`${base}/`);
-  assert.equal(page.status, 401);
+  // Basic 仍兼容（脚本/curl）
+  const withBasic = await fetch(`${base}/api/health`, {
+    headers: { authorization: `Basic ${Buffer.from('demo:s3cret').toString('base64')}` },
+  });
+  assert.equal(withBasic.status, 200);
+
+  // 登出：服务端下发清空 Cookie 的指令（会话本身是无状态的，靠客户端删 token）
+  const logout = await fetch(`${base}/api/logout`, { method: 'POST', headers: { cookie } });
+  assert.equal(logout.status, 200);
+  assert.match(logout.headers.get('set-cookie') ?? '', /Max-Age=0/);
+
+  // 伪造 Cookie 不通过
+  const forged = await fetch(`${base}/api/health`, {
+    headers: { cookie: 'dmv_session=eyJ1IjoiZGVtbyJ9.fake-signature' },
+  });
+  assert.equal(forged.status, 401);
 });
 
 test('医生脚本：干净环境下体检通过', async (t) => {

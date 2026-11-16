@@ -45,6 +45,7 @@ function query(params = {}) {
 
 export const api = {
   health: (opts) => request('GET', '/api/health', undefined, opts),
+  logout: () => request('POST', '/api/logout', {}),
   facets: (opts) => request('GET', '/api/facets', undefined, opts),
 
   getConfig: () => request('GET', '/api/config'),

@@ -7,6 +7,7 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +31,8 @@ import {
   createBackup, listBackups, moviesToCsv, moviesToJson, verifyDataFiles, verifyLibrary, writeExport,
 } from './backup.mjs';
 import { ensureDir, isInside, pathExists, pathKey, statSafe } from './fsx.mjs';
+import { SESSION_COOKIE, SESSION_TTL_MS, LoginThrottle, parseCookies, signSession, verifySession } from './auth.mjs';
+import { renderLoginPage, safeNext } from './login-page.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -1662,7 +1665,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
-  if (!checkAuth(req, res)) return;
+  if (!checkAuth(req, res, url)) return;
   const isApi = url.pathname.startsWith('/api/');
   const runner = isApi ? handleApi(req, res, url) : handleStatic(req, res, url);
   runner.catch((err) => {
@@ -1674,13 +1677,30 @@ const server = http.createServer((req, res) => {
 });
 
 // ── 启动 ────────────────────────────────────────────────────────────────
-/**
- * 可选的 HTTP Basic 认证。
- * 只有设置了 AUTH_USER 才启用；本地使用不受影响（浏览器会弹一次登录框）。
- * @returns {boolean} true 表示放行
- */
-function checkAuth(req, res) {
+/** 会话密钥：首次启动生成，落在数据目录里，重启后登录状态不丢。 */
+let SESSION_SECRET = '';
+const loginThrottle = new LoginThrottle();
+
+async function loadSessionSecret() {
+  const file = path.join(DATA_DIR, '.session-secret');
+  try {
+    const text = (await fs.readFile(file, 'utf8')).trim();
+    if (text.length >= 32) return text;
+  } catch {
+    // 首次运行，生成一个
+  }
+  const secret = crypto.randomBytes(32).toString('hex');
+  await fs.writeFile(file, `${secret}\n`, { mode: 0o600 }).catch(() => {});
+  return secret;
+}
+
+/** 已登录：签名 Cookie，或兼容 Basic（脚本/curl 用）。 */
+function isAuthenticated(req) {
   if (!AUTH_USER) return true;
+  const cookies = parseCookies(req.headers.cookie);
+  const token = cookies[SESSION_COOKIE];
+  if (token && SESSION_SECRET && verifySession(token, SESSION_SECRET)) return true;
+
   const header = String(req.headers.authorization ?? '');
   if (header.startsWith('Basic ')) {
     let decoded = '';
@@ -1694,14 +1714,69 @@ function checkAuth(req, res) {
     const pass = index >= 0 ? decoded.slice(index + 1) : '';
     if (user === AUTH_USER && pass === AUTH_PASS) return true;
   }
-  res.writeHead(401, {
-    'WWW-Authenticate': 'Basic realm="Doomsday Vault", charset="UTF-8"',
-    'Content-Type': 'text/plain; charset=utf-8',
-    'Cache-Control': 'no-store',
-  });
-  res.end('需要登录：请输入部署时配置的用户名和密码。');
   return false;
 }
+
+/**
+ * 认证网关：
+ *   - 未启用 AUTH_USER → 全部放行（本地用法）
+ *   - API 未登录 → 401 JSON（登录接口除外）
+ *   - 页面未登录 → 直接渲染登录页（不再用浏览器原生 Basic 弹窗）
+ * @returns {boolean} true 表示放行
+ */
+function checkAuth(req, res, url) {
+  if (!AUTH_USER) return true;
+  if (isAuthenticated(req)) return true;
+
+  if (url.pathname.startsWith('/api/')) {
+    if (req.method === 'POST' && url.pathname === '/api/login') return true;
+    sendJson(res, 401, { error: { message: '请先登录', code: 'UNAUTHORIZED' } });
+    return false;
+  }
+
+  const wantsHtml = String(req.headers.accept ?? '').includes('text/html')
+    || url.pathname === '/' || url.pathname === '/index.html';
+  if (!wantsHtml) {
+    res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end('需要登录');
+    return false;
+  }
+
+  const page = renderLoginPage({
+    next: safeNext(`${url.pathname}${url.search}`),
+    appName: APP_NAME,
+  });
+  res.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end(page);
+  return false;
+}
+
+const cookieAttrs = `; HttpOnly; Path=/; SameSite=Lax`;
+
+route('POST', '/api/login', async ({ req, res, body }) => {
+  if (!AUTH_USER) return { ok: true, auth: false };
+  const ip = req.socket.remoteAddress ?? 'unknown';
+  if (!loginThrottle.allow(ip)) {
+    throw new HttpError(429, '尝试次数过多，请 1 分钟后再试', 'TOO_MANY_ATTEMPTS');
+  }
+  const user = String(body?.username ?? '').trim();
+  const pass = String(body?.password ?? '');
+  if (!AUTH_PASS || user !== AUTH_USER || pass !== AUTH_PASS) {
+    throw new HttpError(401, '用户名或密码不对', 'LOGIN_FAILED');
+  }
+  loginThrottle.reset(ip);
+  const token = signSession({ u: user }, SESSION_SECRET);
+  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${token}; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}${cookieAttrs}`);
+  return { ok: true, auth: true, user };
+});
+
+route('POST', '/api/logout', async ({ res }) => {
+  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Max-Age=0${cookieAttrs}`);
+  return { ok: true };
+});
 
 /** 解析命令行参数：--port=8080 --host=127.0.0.1 --open --data=路径 */
 function parseCliArgs(argv) {
@@ -1787,6 +1862,11 @@ async function main() {
   if (wishLoaded.count) console.log(`[想看] 已加载 ${wishLoaded.count} 条记录`);
   ffprobeState = await detectFfprobe(config.ffprobePath);
   await thumbnailer.refresh({ force: true });
+
+  if (AUTH_USER) {
+    SESSION_SECRET = await loadSessionSecret();
+    if (!AUTH_PASS) console.warn('[认证] 已设置 AUTH_USER 但 AUTH_PASS 为空，登录将始终失败');
+  }
 
   const port = Number(process.env.PORT) || cli.port || config.server.port || 7788;
   const host = process.env.HOST || cli.host || config.server.host || '127.0.0.1';
